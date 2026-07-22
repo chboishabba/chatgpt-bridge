@@ -82,7 +82,7 @@ test('extension reload fails closed when pending intent cannot be persisted', as
 });
 
 
-test('extension reload waits for the exact terminal command result ACK before restarting runtime', async (t) => {
+test('extension reload waits for the exact command acceptance ACK before restarting runtime', async (t) => {
   const previousChrome = globalThis.chrome;
   t.after(() => {
     if (previousChrome === undefined) delete globalThis.chrome;
@@ -97,7 +97,7 @@ test('extension reload waits for the exact terminal command result ACK before re
   const runtime = {
     lease: null,
     commands: { 'reload-command': { commandId: 'reload-command', status: 'dispatched' } },
-    outbox: [],
+    outbox: [{ messageType: 'command.accepted', commandId: 'reload-command' }],
   };
   let reloads = 0;
   const coordinator = createExtensionReloadCoordinator({
@@ -114,19 +114,14 @@ test('extension reload waits for the exact terminal command result ACK before re
   });
 
   const scheduled = await coordinator.scheduleExtensionReload({
-    expectedVersion: '2.3.0',
+    expectedVersion: '2.3.2',
     sourceTabId: 77,
     commandId: 'reload-command',
     reloadTabs: false,
   });
   assert.equal(scheduled.scheduled, true);
   await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(reloads, 0, 'A dispatched command is not enough to restart the extension');
-
-  runtime.commands['reload-command'] = { commandId: 'reload-command', status: 'succeeded' };
-  runtime.outbox = [{ messageType: 'command.result', commandId: 'reload-command' }];
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(reloads, 0, 'A durable but unacknowledged terminal result must survive before reload');
+  assert.equal(reloads, 0, 'An unacknowledged command.accepted envelope must survive before reload');
 
   runtime.outbox = [];
   await new Promise((resolve) => setTimeout(resolve, 100));

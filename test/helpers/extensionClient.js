@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { once } from 'node:events';
-import WebSocket from 'ws';
+import WebSocket from '../../src/runtime/ws.js';
 import { config } from '../../src/config.js';
 import { ExtensionMessageType, createExtensionEnvelope } from '../../src/bridge/protocol/v5.js';
 
@@ -32,7 +32,7 @@ export async function connectExtensionClient(hub, hello = {}) {
     runtime: 'extension',
     url: hello.url || 'https://chatgpt.com/',
     title: hello.title || 'ChatGPT',
-    extensionVersion: hello.extensionVersion || '2.3.1',
+    extensionVersion: hello.extensionVersion || '2.3.2',
     clientVersion: hello.clientVersion || '4.3.1',
     extensionProtocolVersion: hello.extensionProtocolVersion ?? 5,
     ...hello,

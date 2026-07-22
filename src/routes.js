@@ -664,6 +664,7 @@ export function createRouter(bridge, fileStore, eventBus = null, turnManager = n
         sourceClientId: String(req.body?.sourceClientId || req.body?.clientId || ''),
         expectedVersion: String(req.body?.expectedVersion || ''),
         reloadTabs: req.body?.reloadTabs !== false,
+        allowMaintenancePageBootstrap: req.body?.allowMaintenancePageBootstrap === true,
         timeoutMs: Number(req.body?.timeoutMs) || 30_000,
       });
       res.json({ ok: true, ...result });

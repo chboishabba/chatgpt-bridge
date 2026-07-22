@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import express from 'express';
+import express from '../src/runtime/express.js';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';

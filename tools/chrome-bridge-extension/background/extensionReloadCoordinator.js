@@ -110,20 +110,20 @@ export function createExtensionReloadCoordinator({
     } catch {}
   }
 
-  async function reloadAfterTerminalAck({ tabId, commandId, operationId }) {
+  async function reloadAfterAcceptanceAck({ tabId, commandId, operationId }) {
     const deadline = Date.now() + Math.max(1_000, Number(ackTimeoutMs) || 7_000);
     while (Date.now() < deadline) {
       const runtime = await backgroundState.read(tabId);
       const command = runtime.commands?.[commandId] || null;
-      const terminalCommitted = command?.status === 'succeeded';
-      const terminalFailed = ['rejected', 'uncertain'].includes(String(command?.status || ''));
-      const terminalPending = runtime.outbox.some((entry) => String(entry.commandId || '') === commandId && entry.messageType === 'command.result');
-      if (terminalCommitted && !terminalPending) {
+      const commandFailed = ['rejected', 'uncertain'].includes(String(command?.status || ''));
+      const dispatchCommitted = ['dispatched', 'succeeded'].includes(String(command?.status || ''));
+      const acceptancePending = runtime.outbox.some((entry) => String(entry.commandId || '') === commandId && entry.messageType === 'command.accepted');
+      if (dispatchCommitted && !acceptancePending) {
         reloadRuntime();
         return { reloading: true };
       }
-      if (terminalFailed) {
-        const error = new Error('Extension reload command settled without a successful terminal result');
+      if (commandFailed) {
+        const error = new Error('Extension reload command was rejected before the accepted dispatch was acknowledged');
         error.code = 'MAINTENANCE_COMMAND_REJECTED';
         await clearPendingExtensionReload();
         await maintenanceOperations.fail(operationId, { code: error.code, message: error.message });
@@ -131,7 +131,7 @@ export function createExtensionReloadCoordinator({
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    const error = new Error('Extension reload was not started because the terminal command result was not acknowledged by the server');
+    const error = new Error('Extension reload was not started because command acceptance was not acknowledged by the server');
     error.code = 'MAINTENANCE_ACK_TIMEOUT';
     await clearPendingExtensionReload();
     await maintenanceOperations.fail(operationId, { code: error.code, message: error.message });
@@ -212,8 +212,8 @@ export function createExtensionReloadCoordinator({
     }
     const dispatched = await maintenanceOperations.dispatch(operationId);
     if (!dispatched.accepted) throw new Error(`Extension maintenance dispatch rejected: ${dispatched.reason}`);
-    void reloadAfterTerminalAck({ tabId: sourceTabId, commandId: terminalCommandId, operationId })
-      .catch((error) => console.error('[chatgpt-bridge] extension reload acknowledgement barrier failed', error));
+    void reloadAfterAcceptanceAck({ tabId: sourceTabId, commandId: terminalCommandId, operationId })
+      .catch((error) => console.error('[chatgpt-bridge] extension reload acceptance barrier failed', error));
     return {
       operationId,
       scheduled: true,

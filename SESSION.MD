@@ -3,7 +3,7 @@
 ## Current release
 
 - Bridge package: `6.3.0`.
-- Extension manifest: `2.3.1`.
+- Extension manifest: `2.3.2`.
 - Content runtime: `4.3.1`.
 - Extension protocol: `5` only.
 - Background persistence schema: `6` only.

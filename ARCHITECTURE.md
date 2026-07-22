@@ -7,7 +7,7 @@ The workflow v3 and Protocol 5 hard cut is implemented in the current tree. Prot
 Current versions:
 
 - bridge package: `6.3.0`;
-- extension package: `2.3.1`;
+- extension package: `2.3.2`;
 - content runtime: `4.3.1`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
@@ -114,7 +114,7 @@ Standalone writes use command records rather than request `BrowserEffect` owners
 - model/effort application is reconciled by a read probe of the current selection;
 - attachment clearing is reconciled only from a known composer root with an empty attachment set;
 - artifact fetch is reconciled from the persisted `DownloadCapture`;
-- extension reload is reconciled by the maintenance-operation epoch and terminal-ACK barrier;
+- extension reload is reconciled by the maintenance-operation epoch and the ACK of its durable `command.accepted` envelope; startup may use the deployed extension maintenance page when an older protocol-5 runtime cannot persist its terminal result;
 - session creation and browser tab open/close remain non-reconcilable after ambiguous dispatch and settle as typed uncertainty without a second write.
 
 Read-only commands may be repeated only while their source and preconditions remain valid. A dispatched or uncertain write may be retried only after a kind-specific reconciler returns `proved_not_started`; an idempotency key alone is not proof. Unknown or legacy commands cannot reach the executor.

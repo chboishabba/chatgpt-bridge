@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import express from 'express';
+import express from '../src/runtime/express.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { openPublicTurnEventStream } from '../scripts/e2e/public-turn-stream.js';

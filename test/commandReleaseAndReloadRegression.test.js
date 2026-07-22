@@ -332,7 +332,7 @@ test('command registry rejects a sparse layout capture before resolving the comm
 });
 
 
-test('extension reload waits for the server ACK of its exact durable terminal result', async (t) => {
+test('extension reload waits for the server ACK of its durable command acceptance', async (t) => {
   const h = backgroundHarness(96);
   const previousChrome = globalThis.chrome;
   t.after(() => {
@@ -351,6 +351,11 @@ test('extension reload waits for the server ACK of its exact durable terminal re
     envelope: serverEnvelope({ sequence: 1, commandId: 'reload-ack-command', type: 'extension.reload', payload: { reloadTabs: false } }),
   });
 
+  let runtime = await h.backgroundState.read(h.state.tabId);
+  const accepted = runtime.outbox.find((entry) => entry.messageType === ExtensionMessageType.COMMAND_ACCEPTED
+    && entry.commandId === 'reload-ack-command');
+  assert.ok(accepted, 'Reload command acceptance must be durable before maintenance scheduling');
+
   let reloads = 0;
   const coordinator = createExtensionReloadCoordinator({
     backgroundState: h.backgroundState,
@@ -368,30 +373,19 @@ test('extension reload waits for the server ACK of its exact durable terminal re
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.0',
-  });
-  await handlePayload(h, null, h.state, {
-    type: 'extension.reload.accepted',
-    commandId: 'reload-ack-command',
-    extensionVersion: '2.3.0',
-    contentVersion: '4.3.0',
-    pageReload: { armed: false, reason: 'tabs_not_reloaded' },
+    expectedVersion: '2.3.2',
   });
 
-  let runtime = await h.backgroundState.read(h.state.tabId);
-  const terminal = runtime.outbox.find((entry) => entry.messageType === ExtensionMessageType.COMMAND_RESULT
-    && entry.commandId === 'reload-ack-command');
-  assert.ok(terminal, 'Reload terminal result must be durably present before runtime restart');
   await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(reloads, 0);
+  assert.equal(reloads, 0, 'Runtime must remain alive until the server acknowledges command acceptance');
 
   const ack = createExtensionEnvelope(ExtensionMessageType.TRANSPORT_ACK, {
-    ackMessageId: terminal.messageId,
-    acceptedSequence: terminal.source.sequence,
+    ackMessageId: accepted.messageId,
+    acceptedSequence: accepted.source.sequence,
     accepted: true,
     reason: '',
   }, {
-    messageId: 'reload-terminal-ack',
+    messageId: 'reload-acceptance-ack',
     source: {
       clientId: 'server',
       tabId: h.state.tabId,
@@ -399,10 +393,11 @@ test('extension reload waits for the server ACK of its exact durable terminal re
       contentEpoch: '',
       sequence: 2,
     },
-    causationId: terminal.messageId,
+    causationId: accepted.messageId,
   });
   await handleServerEnvelope({ ...h, envelope: ack });
   await waitFor(() => reloads === 1);
   runtime = await h.backgroundState.read(h.state.tabId);
-  assert.equal(runtime.outbox.some((entry) => entry.messageId === terminal.messageId), false);
+  assert.equal(runtime.outbox.some((entry) => entry.messageId === accepted.messageId), false);
+  assert.equal(runtime.commands['reload-ack-command'].status, 'dispatched');
 });

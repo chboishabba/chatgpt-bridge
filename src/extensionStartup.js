@@ -178,6 +178,7 @@ export async function maybeReloadExtensionAtStartup({
     sourceClientId: connected.client.id,
     expectedVersion: info.version,
     reloadTabs,
+    allowMaintenancePageBootstrap: true,
     timeoutMs: reloadTimeoutMs,
   });
   const reconnectedVersion = String(result?.reconnected?.extensionVersion || result?.extensionVersion || '');

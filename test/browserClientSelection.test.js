@@ -408,3 +408,99 @@ test('extension reload replaces an owned tab when page-owned reload cannot be ar
   assert.equal(close.payload.tabId, 42);
   assert.equal(close.payload.expectedLaunchToken, 'bridge-real-e2e-fallback123');
 });
+
+test('extension reload bootstraps an outdated protocol-5 runtime through the deployed maintenance page', async () => {
+  const original = {
+    id: 'client-maintenance-bootstrap',
+    ready: true,
+    selected: true,
+    browserTabId: 42,
+    launchToken: 'bridge-real-e2e-maintenance123',
+    url: 'https://chatgpt.com/c/maintenance-bootstrap',
+    origin: 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb',
+    extensionVersion: '2.3.0',
+    clientVersion: '4.3.0',
+    extensionProtocolVersion: 5,
+    compatible: false,
+    compatibility: { compatible: false, status: 'extension_outdated' },
+    activeRequest: null,
+    connectedAt: new Date(Date.now() - 10_000).toISOString(),
+  };
+  const hub = new ClientSelectionHub([original]);
+  const openedUrls = [];
+  const bridge = new BrowserBridge(hub, null, null, {
+    publicBaseUrl: 'http://127.0.0.1:18181',
+    openExternalUrl: async (url) => {
+      openedUrls.push(url);
+      const parsed = new URL(url);
+      assert.equal(`${parsed.protocol}//${parsed.host}`, original.origin);
+      assert.equal(parsed.pathname, '/maintenance-reload.html');
+      assert.equal(parsed.searchParams.get('expectedVersion'), '2.3.2');
+      assert.equal(parsed.searchParams.get('sourceTabId'), '42');
+      assert.equal(parsed.searchParams.get('sourceLaunchToken'), original.launchToken);
+      assert.equal(parsed.searchParams.get('serverUrl'), 'http://127.0.0.1:18181');
+      const reconnected = {
+        ...original,
+        id: 'client-maintenance-bootstrap-new',
+        extensionVersion: '2.3.2',
+        clientVersion: '4.3.1',
+        compatible: true,
+        compatibility: { compatible: true, status: 'compatible' },
+        connectedAt: new Date().toISOString(),
+      };
+      hub._clients = [reconnected];
+      setImmediate(() => hub.emit('client.ready', reconnected));
+    },
+  });
+
+  const result = await bridge.reloadExtension({
+    sourceClientId: original.id,
+    expectedVersion: '2.3.2',
+    timeoutMs: 2_000,
+    allowMaintenancePageBootstrap: true,
+  });
+
+  assert.equal(result.reconnected.extensionVersion, '2.3.2');
+  assert.equal(result.recovery.reason, 'maintenance_page_bootstrap');
+  assert.equal(openedUrls.length, 1);
+  assert.equal(hub.sent.some((entry) => entry.payload.type === 'extension.reload'), false);
+});
+
+test('extension reload accepts a compatible reconnect even when the old runtime loses its terminal result', async () => {
+  const original = {
+    id: 'client-reconnect-before-result',
+    ready: true,
+    selected: true,
+    browserTabId: 51,
+    launchToken: 'bridge-real-e2e-reconnect123',
+    url: 'https://chatgpt.com/c/reconnect-before-result',
+    origin: 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb',
+    extensionVersion: '2.3.2',
+    clientVersion: '4.3.1',
+    extensionProtocolVersion: 5,
+    compatible: true,
+    compatibility: { compatible: true, status: 'compatible' },
+    activeRequest: null,
+    connectedAt: new Date(Date.now() - 10_000).toISOString(),
+  };
+  const hub = new ClientSelectionHub([original]);
+  const baseSend = hub.sendToClient.bind(hub);
+  hub.sendToClient = (clientId, payload) => {
+    const client = baseSend(clientId, payload);
+    if (payload.type === 'extension.reload') {
+      const reconnected = { ...original, connectedAt: new Date().toISOString() };
+      hub._clients = [reconnected];
+      setImmediate(() => hub.emit('client.ready', reconnected));
+    }
+    return client;
+  };
+  const bridge = new BrowserBridge(hub, null, null, { publicBaseUrl: 'http://127.0.0.1:18181' });
+  const result = await bridge.reloadExtension({
+    sourceClientId: original.id,
+    expectedVersion: '2.3.2',
+    timeoutMs: 2_000,
+  });
+  assert.equal(result.recovery.reason, 'reconnected_before_terminal_result');
+  assert.equal(result.reconnected.extensionVersion, '2.3.2');
+  assert.equal(hub.reloadControlCalls.length, 1);
+});

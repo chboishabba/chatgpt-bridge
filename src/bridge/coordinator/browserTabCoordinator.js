@@ -7,6 +7,24 @@ import {
 } from '../../browserLaunch.js';
 import { normalizeLaunchedClient } from '../clientSelection.js';
 
+const EXTENSION_ORIGIN_RE = /^chrome-extension:\/\/[a-p]{32}$/i;
+const MAINTENANCE_RELOAD_CONFIRMATION = 'chatgpt-bridge-maintenance-reload-v1';
+
+function extensionMaintenanceReloadUrl(client = {}, options = {}) {
+  const origin = String(client.origin || '').replace(/\/$/, '');
+  if (!EXTENSION_ORIGIN_RE.test(origin)) return '';
+  const url = new URL(`${origin}/maintenance-reload.html`);
+  url.searchParams.set('confirm', MAINTENANCE_RELOAD_CONFIRMATION);
+  url.searchParams.set('expectedVersion', String(options.expectedVersion || ''));
+  url.searchParams.set('reloadTabs', options.reloadTabs === false ? '0' : '1');
+  url.searchParams.set('serverUrl', String(options.serverUrl || ''));
+  url.searchParams.set('commandId', String(options.commandId || `maintenance-${makeRequestId()}`));
+  if (Number.isInteger(client.browserTabId)) url.searchParams.set('sourceTabId', String(client.browserTabId));
+  if (BROWSER_LAUNCH_TOKEN_RE.test(String(client.launchToken || ''))) url.searchParams.set('sourceLaunchToken', String(client.launchToken));
+  if (String(client.url || '')) url.searchParams.set('requestedUrl', String(client.url));
+  return url.toString();
+}
+
 /**
  * Owns server-side browser tab operations and extension reload handoff. Prompt
  * selection remains in BrowserClientCoordinator and calls this controller only
@@ -98,7 +116,7 @@ export class BrowserTabCoordinator {
         return `${candidate.id || 'unknown'} url=${candidate.url || '(empty)'} reportedToken=${candidate.launchToken ? 'yes' : 'no'} urlToken=${urlToken ? 'yes' : 'no'} extension=${candidate.extensionVersion || '?'} content=${candidate.clientVersion || '?'}`;
       });
       const suffix = observed.length ? ` Observed clients: ${observed.join('; ')}` : ' No clients connected to this bridge instance.';
-      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.1 with content runtime 4.3.1 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
+      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.2 with content runtime 4.3.1 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
     });
     const launchedClient = normalizeLaunchedClient(client, launchToken);
     return {
@@ -175,6 +193,7 @@ export class BrowserTabCoordinator {
     const expectedVersion = String(options.expectedVersion || '');
     const timeoutMs = Math.max(2_000, Number(options.timeoutMs) || 20_000);
     const requestedAt = Date.now();
+    const reloadServerUrl = options.serverUrl || this.runtimeOptions.publicBaseUrl;
     let cancelWait = () => {};
     const reconnectPromise = new Promise((resolve, reject) => {
       const check = (client) => {
@@ -201,28 +220,95 @@ export class BrowserTabCoordinator {
         resolve(existing);
       }
     });
-    let accepted;
-    const reloadServerUrl = options.serverUrl || this.runtimeOptions.publicBaseUrl;
-    try {
-      accepted = await this.sendCommand('extension.reload', {
-        reloadTabs: options.reloadTabs !== false,
-        expectedVersion,
-        sourceTabId: Number.isInteger(before.browserTabId) ? before.browserTabId : null,
-        sourceLaunchToken: BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || '')) ? before.launchToken : '',
-        temporaryServerUrl: String(reloadServerUrl || ''),
-        connection: { serverUrl: reloadServerUrl },
-        pageReloadDelayMs: 12_000,
-      }, {
-        sourceClientId: before.id,
-        timeoutMs: Math.min(timeoutMs, 8_000),
-        allowIncompatibleReload: true,
-      });
-    } catch (error) {
-      cancelWait();
-      reconnectPromise.catch(() => {});
-      throw error;
+
+    const maintenanceUrl = options.allowMaintenancePageBootstrap === true
+      && !before.activeRequest?.requestId
+      && expectedVersion
+      && String(before.extensionVersion || '') !== expectedVersion
+      ? extensionMaintenanceReloadUrl(before, {
+          expectedVersion,
+          reloadTabs: options.reloadTabs !== false,
+          serverUrl: reloadServerUrl,
+        })
+      : '';
+    if (maintenanceUrl) {
+      try {
+        await this.runtimeOptions.openExternalUrl(maintenanceUrl, { allowExtensionMaintenance: true });
+        return {
+          accepted: { scheduled: true, bootstrapPage: true, inferredFromReconnect: true },
+          reconnected: await reconnectPromise,
+          recovery: { used: true, reason: 'maintenance_page_bootstrap' },
+        };
+      } catch (error) {
+        cancelWait();
+        reconnectPromise.catch(() => {});
+        const wrapped = new Error(`Extension maintenance bootstrap did not reconnect the updated runtime: ${error?.message || error}`);
+        wrapped.code = 'EXTENSION_MAINTENANCE_BOOTSTRAP_FAILED';
+        wrapped.cause = error;
+        throw wrapped;
+      }
     }
 
+    const commandPromise = this.sendCommand('extension.reload', {
+      reloadTabs: options.reloadTabs !== false,
+      expectedVersion,
+      sourceTabId: Number.isInteger(before.browserTabId) ? before.browserTabId : null,
+      sourceLaunchToken: BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || '')) ? before.launchToken : '',
+      temporaryServerUrl: String(reloadServerUrl || ''),
+      connection: { serverUrl: reloadServerUrl },
+      pageReloadDelayMs: 12_000,
+    }, {
+      sourceClientId: before.id,
+      timeoutMs: Math.min(timeoutMs, 8_000),
+      allowIncompatibleReload: true,
+    });
+    const first = await Promise.race([
+      commandPromise.then((value) => ({ kind: 'command', value }), (error) => ({ kind: 'command_error', error })),
+      reconnectPromise.then((value) => ({ kind: 'reconnected', value }), (error) => ({ kind: 'reconnect_error', error })),
+    ]);
+    if (first.kind === 'reconnected') {
+      commandPromise.catch(() => {});
+      return {
+        accepted: { scheduled: true, inferredFromReconnect: true },
+        reconnected: first.value,
+        recovery: { used: true, reason: 'reconnected_before_terminal_result' },
+      };
+    }
+    if (first.kind === 'reconnect_error') {
+      commandPromise.catch(() => {});
+      throw first.error;
+    }
+    if (first.kind === 'command_error') {
+      const fallbackUrl = options.allowMaintenancePageBootstrap === true && !before.activeRequest?.requestId
+        ? extensionMaintenanceReloadUrl(before, {
+            expectedVersion,
+            reloadTabs: options.reloadTabs !== false,
+            serverUrl: reloadServerUrl,
+          })
+        : '';
+      if (!fallbackUrl) {
+        cancelWait();
+        reconnectPromise.catch(() => {});
+        throw first.error;
+      }
+      try {
+        await this.runtimeOptions.openExternalUrl(fallbackUrl, { allowExtensionMaintenance: true });
+        return {
+          accepted: { scheduled: true, bootstrapPage: true, inferredFromReconnect: true, commandError: first.error?.message || String(first.error) },
+          reconnected: await reconnectPromise,
+          recovery: { used: true, reason: 'maintenance_page_after_command_failure' },
+        };
+      } catch (error) {
+        cancelWait();
+        reconnectPromise.catch(() => {});
+        const wrapped = new Error(`Extension reload command failed and the maintenance bootstrap did not reconnect: ${error?.message || error}`);
+        wrapped.code = 'EXTENSION_RELOAD_AND_BOOTSTRAP_FAILED';
+        wrapped.cause = first.error;
+        throw wrapped;
+      }
+    }
+
+    const accepted = first.value;
     const ownedTabRecovery = options.reloadTabs !== false
       && Number.isInteger(Number(before.browserTabId))
       && BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || ''));

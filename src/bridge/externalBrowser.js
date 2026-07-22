@@ -1,8 +1,25 @@
 import { spawn } from 'node:child_process';
 import { safeChatGptUrl } from '../browserLaunch.js';
 
-export function openExternalBrowserUrl(value) {
-  const url = safeChatGptUrl(value);
+const EXTENSION_ORIGIN_RE = /^chrome-extension:\/\/[a-p]{32}$/i;
+const MAINTENANCE_RELOAD_PATH = '/maintenance-reload.html';
+const MAINTENANCE_RELOAD_CONFIRMATION = 'chatgpt-bridge-maintenance-reload-v1';
+
+export function safeExternalBrowserUrl(value, options = {}) {
+  if (options.allowExtensionMaintenance !== true) return safeChatGptUrl(value);
+  const parsed = new URL(String(value || ''));
+  if (!EXTENSION_ORIGIN_RE.test(`${parsed.protocol}//${parsed.host}`)
+    || parsed.pathname !== MAINTENANCE_RELOAD_PATH
+    || parsed.username
+    || parsed.password
+    || parsed.searchParams.get('confirm') !== MAINTENANCE_RELOAD_CONFIRMATION) {
+    throw new Error(`Refusing to open untrusted extension URL: ${parsed.toString()}`);
+  }
+  return parsed.toString();
+}
+
+export function openExternalBrowserUrl(value, options = {}) {
+  const url = safeExternalBrowserUrl(value, options);
   const [command, args] = process.platform === 'darwin'
     ? ['open', [url]]
     : process.platform === 'win32'
