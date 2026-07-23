@@ -137,6 +137,12 @@ test('shared command manifest is closed and every command declares ownership and
     commandId: 'accepted-without-mode',
     source: { clientId: 'client', tabId: 1, backgroundEpoch: 'background', contentEpoch: 'content', sequence: 1 },
   }), /commandMode is invalid/);
+  assert.doesNotThrow(() => createExtensionEnvelope(ExtensionMessageType.COMMAND_ACCEPTED, {
+    commandId: 'accepted-from-older-v5-runtime', commandMode: 'result', commandScope: 'standalone',
+  }, {
+    commandId: 'accepted-from-older-v5-runtime',
+    source: { clientId: 'client', tabId: 1, backgroundEpoch: 'background', contentEpoch: 'content', sequence: 2 },
+  }));
 });
 
 test('background rejects an unknown command before durable registration or content dispatch', async () => {
@@ -169,11 +175,19 @@ test('normal observations cannot reconcile a newly dispatched passive write; onl
       }),
     });
 
+    let runtime = await h.backgroundState.read(h.state.tabId);
+    const accepted = runtime.outbox.find((entry) => entry.commandId === 'passive-command'
+      && entry.messageType === ExtensionMessageType.COMMAND_ACCEPTED);
+    assert.ok(accepted);
+    assert.equal(accepted.body.commandType, 'passive.prompt.submit');
+    assert.equal(accepted.body.commandMode, 'result');
+    assert.equal(accepted.body.commandScope, 'standalone');
+
     await handlePayload(h, null, h.state, {
       type: 'tab.observation',
       observation: { revision: 1, conversationId: 'conversation-p0', turn: { userPrompt: 'older prompt', userKey: 'user-old' } },
     });
-    let runtime = await h.backgroundState.read(h.state.tabId);
+    runtime = await h.backgroundState.read(h.state.tabId);
     assert.equal(runtime.commands['passive-command'].status, 'dispatched');
 
     await handlePayload(h, null, h.state, { type: 'hello', url: 'https://chatgpt.com/c/conversation-p0' });

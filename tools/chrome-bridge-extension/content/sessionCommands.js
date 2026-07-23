@@ -53,6 +53,15 @@ function armPageOwnedReload(delayMs = 900, timeoutMs = 1_500) {
   });
 }
 
+function disarmPageOwnedReload(reloadId = '') {
+  if (!reloadId) return;
+  window.postMessage({
+    source: PAGE_RELOAD_CONTENT_SOURCE,
+    type: 'page.reload.cancel',
+    reloadId: String(reloadId),
+  }, '*');
+}
+
 function getCurrentSession() {
   const id = conversationIdFromUrl(location.href) || 'new';
   return { id, url: location.href, title: document.title || id, active: true };
@@ -180,17 +189,26 @@ async function handleExtensionReload(payload) {
       token: CONFIG.token,
     })
     : { staged: false, reason: reloadTabs ? 'staging_unavailable' : 'tabs_not_reloaded' };
-  const scheduled = await extensionRequest('bridge.extension.reload', {
-    commandId: String(payload.commandId || ''),
-    reloadTabs,
-    expectedVersion: String(payload.expectedVersion || ''),
-    sourceTabId: Number.isInteger(payload.sourceTabId) ? payload.sourceTabId : null,
-    sourceLaunchToken: String(payload.sourceLaunchToken || ''),
-    temporaryServerUrl: safeLaunchBridgeServerUrl(payload.temporaryServerUrl || payload.connection?.serverUrl || ''),
-  }, 5_000);
   const pageReload = reloadTabs
     ? await armPageOwnedReload(Number(payload.pageReloadDelayMs) || 12_000)
     : { armed: false, reason: 'tabs_not_reloaded' };
+  let scheduled;
+  try {
+    // Arm the page-owned fallback before asking the service worker to restart.
+    // The background may reload as soon as command.accepted is ACKed, which can
+    // invalidate this content runtime before it executes another instruction.
+    scheduled = await extensionRequest('bridge.extension.reload', {
+      commandId: String(payload.commandId || ''),
+      reloadTabs,
+      expectedVersion: String(payload.expectedVersion || ''),
+      sourceTabId: Number.isInteger(payload.sourceTabId) ? payload.sourceTabId : null,
+      sourceLaunchToken: String(payload.sourceLaunchToken || ''),
+      temporaryServerUrl: safeLaunchBridgeServerUrl(payload.temporaryServerUrl || payload.connection?.serverUrl || ''),
+    }, 5_000);
+  } catch (error) {
+    if (pageReload.armed) disarmPageOwnedReload(pageReload.reloadId);
+    throw error;
+  }
   send({
     type: 'extension.reload.accepted',
     commandId: payload.commandId,

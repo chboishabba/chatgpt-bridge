@@ -195,6 +195,16 @@
       return;
     }
 
+    if (message.type === 'page.reload.cancel') {
+      const reloadId = String(message.reloadId || '');
+      const existing = window[PAGE_RELOAD_STATE_KEY];
+      if (!reloadId || existing?.reloadId !== reloadId) return;
+      if (existing.timer) clearTimeout(existing.timer);
+      delete window[PAGE_RELOAD_STATE_KEY];
+      post('page.reload.cancelled', { reloadId });
+      return;
+    }
+
     if (message.type === 'artifact.capture.arm') {
       armCapture(message);
       return;

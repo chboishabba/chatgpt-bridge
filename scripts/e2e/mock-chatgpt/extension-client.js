@@ -88,9 +88,9 @@ export class MockExtensionTab extends EventEmitter {
       browserTabId: this.tabId,
       launchToken: this.launchToken,
       requestedUrl: this.requestedUrl,
-      clientVersion: '4.3.2',
-      extensionVersion: '2.3.3',
-      extensionBundleId: '6.3.1-20260723.1',
+      clientVersion: '4.3.3',
+      extensionVersion: '2.3.4',
+      extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a',
       extensionProtocolVersion: 5,
       visibilityState: 'visible',
       focused: true,
@@ -228,10 +228,15 @@ export class MockExtensionTab extends EventEmitter {
 
   async #accepted(envelope) {
     const body = envelope.body || {};
+    const mode = commandMode(body);
+    const effect = mode === 'effect' ? this.#step(body) : null;
     await this.send(ExtensionMessageType.COMMAND_ACCEPTED, {
       commandId: envelope.commandId,
-      commandMode: commandMode(body),
+      commandType: text(body.type),
+      requestId: text(envelope.request?.requestId),
+      commandMode: mode,
       commandScope: envelope.request ? 'request' : 'standalone',
+      ...(effect ? { effectId: text(effect.effectId), effectType: text(effect.kind) } : {}),
       acceptedAt: Date.now(),
     }, { commandId: envelope.commandId, request: envelope.request, causationId: envelope.messageId });
   }
@@ -334,7 +339,7 @@ export class MockExtensionTab extends EventEmitter {
         return;
       }
       if (type === 'extension.reload') {
-        await this.#result(envelope, 'extension.reload.accepted', { accepted: true, expectedVersion: body.expectedVersion || '2.3.3' });
+        await this.#result(envelope, 'extension.reload.accepted', { accepted: true, expectedVersion: body.expectedVersion || '2.3.4' });
         setTimeout(() => { void this.reconnect({ replaceBackground: true, replaceContent: true }); }, 35);
         return;
       }

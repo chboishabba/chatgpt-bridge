@@ -266,7 +266,15 @@ async function registerAndDispatchEffectCommand({ state, envelope, payload, back
   const descriptor = effectDescriptorForCommand(commandType, payload);
   const descriptorError = validateEffectBackedCommand(commandType, payload, request);
   if (descriptorError) throw new Error(descriptorError);
-  const acceptedBody = { commandId, requestId: request.requestId, commandScope: 'request', commandMode: 'effect', effectId: String(descriptor.effectId), effectType: String(descriptor.kind) };
+  const acceptedBody = {
+    commandId,
+    commandType,
+    requestId: request.requestId,
+    commandScope: 'request',
+    commandMode: 'effect',
+    effectId: String(descriptor.effectId),
+    effectType: String(descriptor.kind),
+  };
   const acceptedEnvelope = createEnvelopeDraft(state, MessageType.COMMAND_ACCEPTED, acceptedBody, {
     commandId, causationId: envelope.messageId, lease: request,
   });
@@ -325,7 +333,13 @@ async function registerAndDispatchCommand({ state, envelope, payload, background
   });
   if (!registered.accepted) throw new Error(`Browser command registration rejected: ${registered.reason}`);
 
-  const acceptedBody = { commandId, requestId: request?.requestId || '', commandScope: scope, commandMode: mode };
+  const acceptedBody = {
+    commandId,
+    commandType: String(payload.type || ''),
+    requestId: request?.requestId || '',
+    commandScope: scope,
+    commandMode: mode,
+  };
   const acceptedEnvelope = createEnvelopeDraft(state, MessageType.COMMAND_ACCEPTED, acceptedBody, {
     commandId, causationId: envelope.messageId, lease: request,
   });

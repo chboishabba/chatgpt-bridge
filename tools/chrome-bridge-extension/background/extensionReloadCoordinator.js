@@ -75,6 +75,12 @@ export function createExtensionReloadCoordinator({
     const stored = await storage.get(PENDING_EXTENSION_RELOAD_KEY);
     const pending = stored?.[PENDING_EXTENSION_RELOAD_KEY];
     if (!pending || !Array.isArray(pending.tabIds)) return { recovered: false, reason: 'missing' };
+    console.info('[chatgpt-bridge] Restoring extension reload', {
+      operationId: String(pending.operationId || ''),
+      commandId: String(pending.commandId || ''),
+      expectedVersion: String(pending.expectedVersion || ''),
+      tabCount: pending.tabIds.length,
+    });
     const requestedAt = Number(pending.requestedAt || 0);
     if (!requestedAt || Date.now() - requestedAt > PENDING_EXTENSION_RELOAD_TTL_MS) {
       await storage.remove(PENDING_EXTENSION_RELOAD_KEY);
@@ -95,6 +101,12 @@ export function createExtensionReloadCoordinator({
     await storage.remove(PENDING_EXTENSION_RELOAD_KEY);
     const result = { recovered: true, tabCount: pending.tabIds.length, sourceTabId };
     if (pending.operationId) await maintenanceOperations.succeed(pending.operationId, result);
+    console.info('[chatgpt-bridge] Extension reload recovery completed', {
+      operationId: String(pending.operationId || ''),
+      commandId: String(pending.commandId || ''),
+      tabCount: pending.tabIds.length,
+      sourceTabId,
+    });
     return result;
   }
 
@@ -119,6 +131,9 @@ export function createExtensionReloadCoordinator({
       const dispatchCommitted = ['dispatched', 'succeeded'].includes(String(command?.status || ''));
       const acceptancePending = runtime.outbox.some((entry) => String(entry.commandId || '') === commandId && entry.messageType === 'command.accepted');
       if (dispatchCommitted && !acceptancePending) {
+        console.info('[chatgpt-bridge] Restarting extension runtime after acknowledged command', {
+          commandId: String(commandId || ''), operationId: String(operationId || ''), tabId,
+        });
         reloadRuntime();
         return { reloading: true };
       }
@@ -212,6 +227,10 @@ export function createExtensionReloadCoordinator({
     }
     const dispatched = await maintenanceOperations.dispatch(operationId);
     if (!dispatched.accepted) throw new Error(`Extension maintenance dispatch rejected: ${dispatched.reason}`);
+    console.info('[chatgpt-bridge] Extension reload scheduled', {
+      operationId, commandId: terminalCommandId, expectedVersion: String(expectedVersion || ''),
+      reloadTabs: Boolean(reloadTabs), tabCount: tabs.length, sourceTabId,
+    });
     void reloadAfterAcceptanceAck({ tabId: sourceTabId, commandId: terminalCommandId, operationId })
       .catch((error) => console.error('[chatgpt-bridge] extension reload acceptance barrier failed', error));
     return {

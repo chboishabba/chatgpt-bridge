@@ -373,7 +373,7 @@ test('extension reload waits for the server ACK of its durable command acceptanc
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.3',
+    expectedVersion: '2.3.4',
   });
 
   await new Promise((resolve) => setTimeout(resolve, 80));

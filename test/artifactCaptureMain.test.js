@@ -200,3 +200,25 @@ test('artifact main source never overrides URL.revokeObjectURL', async () => {
   assert.match(source, /function installHooks/);
   assert.match(source, /function uninstallHooksIfIdle/);
 });
+
+
+test('page-owned reload cancellation clears the main-world timer', async () => {
+  const harness = await loadHarness();
+  const { window, timers, messages } = harness;
+  window.postMessage({
+    source: 'chatgpt-browser-bridge-artifact-content-v1',
+    type: 'page.reload.arm',
+    reloadId: 'reload-cancel-test',
+    delayMs: 12_000,
+  });
+  const timer = timers.at(-1);
+  assert.ok(timer);
+  assert.equal(timer.cleared, false);
+  window.postMessage({
+    source: 'chatgpt-browser-bridge-artifact-content-v1',
+    type: 'page.reload.cancel',
+    reloadId: 'reload-cancel-test',
+  });
+  assert.equal(timer.cleared, true);
+  assert.equal(messages.some((message) => message.type === 'page.reload.cancelled' && message.reloadId === 'reload-cancel-test'), true);
+});

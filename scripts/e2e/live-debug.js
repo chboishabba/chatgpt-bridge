@@ -112,7 +112,8 @@ function modelPickerDebugMessage(event = {}) {
 
 function compactBrowserDebugFields(data = {}, request = '') {
   const keys = [
-    'commandId', 'requestId', 'activeRequestId', 'expectedRequestId', 'ownerServerInstanceId',
+    'commandId', 'commandType', 'commandMode', 'commandScope', 'effectType', 'effectId',
+    'requestId', 'activeRequestId', 'expectedRequestId', 'ownerServerInstanceId',
     'phase', 'previousPhase', 'reason', 'stage', 'status', 'kind', 'source', 'method', 'action',
     'attempt', 'round', 'index', 'count', 'visible', 'total', 'busy', 'removed',
     'timeoutMs', 'waitedMs', 'elapsedMs', 'sentFor', 'maxRequestTimeoutMs', 'maxWaitMs',
@@ -145,6 +146,15 @@ function browserDebugMessage(event = {}) {
   const phaseScope = request ? `browser:${String(request).slice(-8)}` : 'browser';
 
   switch (name) {
+    case 'command.accepted':
+      return ['info', phaseScope, 'Browser accepted command', {
+        request: request || data.requestId || '',
+        command: data.commandType || 'unknown',
+        effect: data.effectType || '',
+        mode: data.commandMode || '',
+        scope: data.commandScope || '',
+        commandId: data.commandId || '',
+      }];
     case 'prompt.accepted':
       return ['ok', phaseScope, 'Browser runtime accepted the prompt request', fields];
     case 'page.ready.wait':
@@ -387,6 +397,10 @@ function browserDebugMessage(event = {}) {
       if (!name) return null;
       return ['info', phaseScope, `Browser diagnostic: ${name}`, compactBrowserDebugFields(data, request)];
   }
+}
+
+export function mapLiveDebugEvent(event = {}) {
+  return browserDebugMessage(event);
 }
 
 export async function startLiveDebugTrace(options, testLog) {

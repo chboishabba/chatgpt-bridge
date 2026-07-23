@@ -53,18 +53,50 @@ function internalPayloadForEnvelope(envelope, body = {}) {
   return { ...body };
 }
 
+function commandMetadata(payload = {}, options = {}) {
+  const commandType = String(payload?.type || '');
+  const definition = globalThis.ChatGptBridgeCommandManifest?.commandDefinition?.(commandType) || null;
+  const plan = payload?.executionPlan && typeof payload.executionPlan === 'object' ? payload.executionPlan : null;
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const startAtStepId = String(plan?.startAtStepId || steps[0]?.stepId || '');
+  const effect = payload?.effect && typeof payload.effect === 'object'
+    ? payload.effect
+    : steps.find((step) => String(step?.stepId || '') === startAtStepId) || null;
+  return Object.freeze({
+    commandType,
+    commandMode: String(definition?.mode || ''),
+    commandScope: options.request ? 'request' : 'standalone',
+    requestId: String(options.request?.requestId || ''),
+    effectId: String(effect?.effectId || ''),
+    effectType: String(effect?.kind || ''),
+  });
+}
+
 export class ProtocolV5Adapter {
   #sources = new Map();
   #owners = new Map();
   #seen = new Set();
   #seenOrder = [];
   #journal = [];
+  #commands = new Map();
+  #commandOrder = [];
 
   prepare(raw, client = {}) {
     const unwrapped = unwrapExtensionEnvelope(raw, { direction: 'extension_to_server', requireClientId: true });
     if (!unwrapped.valid) return this.#reject('invalid_envelope', { diagnostics: unwrapped.errors });
     const { envelope, body } = unwrapped;
     const payload = internalPayloadForEnvelope(envelope, body);
+    if (payload.type === 'command.accepted') {
+      const metadata = this.#commands.get(String(envelope.commandId || '')) || null;
+      if (metadata) {
+        payload.commandType ||= metadata.commandType;
+        payload.commandMode ||= metadata.commandMode;
+        payload.commandScope ||= metadata.commandScope;
+        payload.requestId ||= metadata.requestId;
+        payload.effectId ||= metadata.effectId;
+        payload.effectType ||= metadata.effectType;
+      }
+    }
     if (this.#seen.has(envelope.messageId)) return this.#reject('duplicate_message', { envelope, payload });
 
     const ownerKey = tabOwnerKey(envelope, client);
@@ -120,7 +152,17 @@ export class ProtocolV5Adapter {
   }
 
   command(payload, options = {}) {
-    return createExtensionEnvelope(ExtensionMessageType.COMMAND_EXECUTE, payload, options);
+    const envelope = createExtensionEnvelope(ExtensionMessageType.COMMAND_EXECUTE, payload, options);
+    const commandId = String(envelope.commandId || '');
+    if (commandId) {
+      this.#commands.set(commandId, commandMetadata(payload, options));
+      this.#commandOrder.push(commandId);
+      while (this.#commandOrder.length > MAX_SEEN_MESSAGES) {
+        const oldest = this.#commandOrder.shift();
+        if (oldest) this.#commands.delete(oldest);
+      }
+    }
+    return envelope;
   }
 
   ack(envelope, options = {}) {

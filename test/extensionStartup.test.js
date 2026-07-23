@@ -232,11 +232,11 @@ test('real E2E startup reload discovers clients through the full browser-client 
     api: async (_options, route, request = {}) => {
       calls.push({ route, request });
       if (route === '/browser/clients') {
-        return { clients: [{ id: 'ext-e2e', ready: true, compatible: true, extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', extensionProtocolVersion: 5 }], selectedClientId: 'ext-e2e' };
+        return { clients: [{ id: 'ext-e2e', ready: true, compatible: true, extensionVersion: '2.3.4', extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a', extensionProtocolVersion: 5 }], selectedClientId: 'ext-e2e' };
       }
       if (route === '/browser/extension/reload') {
         assert.equal(request.body.allowMaintenancePageBootstrap, true);
-        return { reconnected: { extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1' } };
+        return { reconnected: { extensionVersion: '2.3.4', extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a' } };
       }
       throw new Error(`Unexpected route: ${route}`);
     },
@@ -274,7 +274,7 @@ test('real E2E bootstraps an outdated protocol-5 tab, reloads it, and selects th
         clients: [reloaded
           ? {
               id: 'updated-tab', ready: true, compatible: true,
-              extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', clientVersion: '4.3.2', extensionProtocolVersion: 5,
+              extensionVersion: '2.3.4', extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a', clientVersion: '4.3.3', extensionProtocolVersion: 5,
               browserTabId: 42, launchToken, pageReady: true, composerReady: true, chatMainReady: true,
               capabilities: { browserTabs: true, sessionDeletion: true, promptSteering: true },
             }
@@ -290,7 +290,7 @@ test('real E2E bootstraps an outdated protocol-5 tab, reloads it, and selects th
       reloaded = true;
       assert.equal(request.body.sourceClientId, 'outdated-tab');
       assert.equal(request.body.allowMaintenancePageBootstrap, true);
-      return { reconnected: { id: 'updated-tab', extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', clientVersion: '4.3.2' } };
+      return { reconnected: { id: 'updated-tab', extensionVersion: '2.3.4', extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a', clientVersion: '4.3.3' } };
     }
     if (route === '/browser/select') {
       assert.equal(request.body.clientId, 'updated-tab');

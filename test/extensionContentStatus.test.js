@@ -54,27 +54,37 @@ test('extension Test button validates BRIDGE_TOKEN, not only setup reachability'
 
 test('Chrome extension manifest version is incremented after extension updates', async () => {
   const manifest = JSON.parse(await fs.readFile(path.resolve('tools/chrome-bridge-extension/manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '2.3.3');
+  assert.equal(manifest.version, '2.3.4');
+  assert.equal(manifest.version_name, '2.3.4');
+  assert.match(manifest.version_name, /^\d+\.\d+\.\d+$/);
+});
+
+test('background service worker emits a boot diagnostic with version and epoch', async () => {
+  const source = await fs.readFile(path.resolve('tools/chrome-bridge-extension/background.js'), 'utf8');
+  assert.match(source, /Background service worker started/);
+  assert.match(source, /version=\$\{backgroundManifestVersion\}/);
+  assert.match(source, /epoch=\$\{backgroundEpoch\}/);
 });
 
 test('extension manifest and content runtime expose the breaking-release versions', async () => {
   const manifest = JSON.parse(await fs.readFile(path.resolve('tools/chrome-bridge-extension/manifest.json'), 'utf8'));
   const source = await readContentRuntimeSource();
   const declaredVersion = source.match(/const CONTENT_SCRIPT_VERSION = '([^']+)'/)?.[1] || '';
-  assert.equal(manifest.version, '2.3.3');
-  assert.equal(declaredVersion, '4.3.2');
+  assert.equal(manifest.version, '2.3.4');
+  assert.equal(declaredVersion, '4.3.3');
   assert.match(source, /globalThis\[INSTANCE_KEY\] = \{ version: CONTENT_SCRIPT_VERSION/);
 });
 
 test('extension manifest loads the extension API and runtime configuration before the main content script', async () => {
   const manifest = JSON.parse(await fs.readFile(path.resolve('tools/chrome-bridge-extension/manifest.json'), 'utf8'));
   const isolatedScripts = manifest.content_scripts.find((entry) => entry.world !== 'MAIN')?.js || [];
+  const buildIdentityIndex = isolatedScripts.indexOf('shared/buildIdentity.js');
   const apiIndex = isolatedScripts.indexOf('content/extensionApi.js');
   const configIndex = isolatedScripts.indexOf('content/runtimeConfig.js');
   const sessionIndex = isolatedScripts.indexOf('content/sessionCommands.js');
   const intelligenceIndex = isolatedScripts.indexOf('content/intelligenceCommands.js');
   const contentIndex = isolatedScripts.indexOf('content.js');
-  assert.ok(apiIndex >= 0 && configIndex > apiIndex && sessionIndex > configIndex && intelligenceIndex > sessionIndex && contentIndex > intelligenceIndex);
+  assert.ok(buildIdentityIndex === 0 && apiIndex > buildIdentityIndex && configIndex > apiIndex && sessionIndex > configIndex && intelligenceIndex > sessionIndex && contentIndex > intelligenceIndex);
 
   const source = await readContentRuntimeSource();
   assert.match(source, /const EXTENSION_API = globalThis\.ChatGptExtensionApi/);

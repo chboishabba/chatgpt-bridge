@@ -451,15 +451,15 @@ test('extension reload falls back to the deployed maintenance page only after th
       const parsed = new URL(url);
       assert.equal(`${parsed.protocol}//${parsed.host}`, original.origin);
       assert.equal(parsed.pathname, '/maintenance-reload.html');
-      assert.equal(parsed.searchParams.get('expectedVersion'), '2.3.3');
+      assert.equal(parsed.searchParams.get('expectedVersion'), '2.3.4');
       assert.equal(parsed.searchParams.get('sourceTabId'), '42');
       assert.equal(parsed.searchParams.get('sourceLaunchToken'), original.launchToken);
       assert.equal(parsed.searchParams.get('serverUrl'), 'http://127.0.0.1:18181');
       const reconnected = {
         ...original,
         id: 'client-maintenance-bootstrap-new',
-        extensionVersion: '2.3.3',
-        clientVersion: '4.3.2',
+        extensionVersion: '2.3.4',
+        clientVersion: '4.3.3',
         compatible: true,
         compatibility: { compatible: true, status: 'compatible' },
         connectedAt: new Date().toISOString(),
@@ -471,12 +471,12 @@ test('extension reload falls back to the deployed maintenance page only after th
 
   const result = await bridge.reloadExtension({
     sourceClientId: original.id,
-    expectedVersion: '2.3.3',
+    expectedVersion: '2.3.4',
     timeoutMs: 2_000,
     allowMaintenancePageBootstrap: true,
   });
 
-  assert.equal(result.reconnected.extensionVersion, '2.3.3');
+  assert.equal(result.reconnected.extensionVersion, '2.3.4');
   assert.equal(result.recovery.reason, 'maintenance_page_after_command_failure');
   assert.equal(openedUrls.length, 1);
   assert.equal(hub.sent.some((entry) => entry.payload.type === 'extension.reload'), true);
@@ -491,8 +491,8 @@ test('extension reload accepts a compatible reconnect even when the old runtime 
     launchToken: 'bridge-real-e2e-reconnect123',
     url: 'https://chatgpt.com/c/reconnect-before-result',
     origin: 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb',
-    extensionVersion: '2.3.3',
-    clientVersion: '4.3.2',
+    extensionVersion: '2.3.4',
+    clientVersion: '4.3.3',
     extensionProtocolVersion: 5,
     compatible: true,
     compatibility: { compatible: true, status: 'compatible' },
@@ -513,10 +513,10 @@ test('extension reload accepts a compatible reconnect even when the old runtime 
   const bridge = new BrowserBridge(hub, null, null, { publicBaseUrl: 'http://127.0.0.1:18181' });
   const result = await bridge.reloadExtension({
     sourceClientId: original.id,
-    expectedVersion: '2.3.3',
+    expectedVersion: '2.3.4',
     timeoutMs: 2_000,
   });
   assert.equal(result.recovery.reason, 'reconnected_before_terminal_result');
-  assert.equal(result.reconnected.extensionVersion, '2.3.3');
+  assert.equal(result.reconnected.extensionVersion, '2.3.4');
   assert.equal(hub.reloadControlCalls.length, 1);
 });

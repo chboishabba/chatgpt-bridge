@@ -195,6 +195,9 @@ test('production hard cut contains no classifier, record reporter, legacy execut
   assert.deepEqual([...handlerTypes].sort(), [...manifestTypes].sort());
 
   const backgroundRouter = entries.find(([file]) => file.endsWith(path.join('background', 'serverEnvelopeRouter.js')))?.[1] || '';
+  const backgroundRoot = entries.find(([file]) => file.endsWith(path.join('tools', 'chrome-bridge-extension', 'background.js')))?.[1] || '';
+  const portRouterInstall = backgroundRoot.match(/installBackgroundPortRouter\(\{[\s\S]*?\n\}\);/)?.[0] || '';
+  assert.match(portRouterInstall, /\bcreateEnvelopeDraft\b/, 'Background composition must inject createEnvelopeDraft into the port router');
   assert.match(backgroundRouter, /if \(!definition\) throw new Error\(`Unsupported browser command type:/);
   assert.doesNotMatch(backgroundRouter, /return\s+['"]result['"]\s*;\s*}\s*\/\/\s*fallback/i);
   assert.equal(BACKGROUND_STATE_SCHEMA_VERSION, 6);

@@ -18,6 +18,8 @@ import { createTabController } from './background/tabController.js';
 import { checkBridgeAuth } from './background/authPreflight.js';
 const connections = new Map();
 const backgroundEpoch = createRuntimeEpoch('background');
+const backgroundManifestVersion = String(chrome.runtime?.getManifest?.()?.version || 'unknown');
+console.info('[chatgpt-bridge] Background service worker started', `version=${backgroundManifestVersion}`, `epoch=${backgroundEpoch}`);
 const backgroundState = new BackgroundStateStore(chrome.storage?.session, backgroundEpoch);
 void backgroundState.cleanupLegacyStateIfIdle().catch((error) => console.warn('[chatgpt-bridge] background legacy-state cleanup failed', error));
 const tabOperations = new TabOperationQueue({ maxPending: 250, reservedCritical: 16 });
@@ -395,6 +397,7 @@ installBackgroundPortRouter({
   tabOperations,
   post,
   sendProtocolMessage,
+  createEnvelopeDraft,
   replayCriticalOutbox,
   flushCriticalOutbox,
   adoptPageLaunchMetadata,

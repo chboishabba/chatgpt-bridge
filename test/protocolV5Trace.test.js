@@ -137,6 +137,40 @@ test('Protocol 5 adapter preserves command correlation on physical effect outcom
   assert.equal(accepted.payload.type, 'request.effect.succeeded');
 });
 
+test('Protocol 5 adapter enriches older command acknowledgements from the outbound command registry', () => {
+  const adapter = new ProtocolV5Adapter();
+  const client = { id: 'client-v5', browserTabId: tabId, connectionId: 'connection-v5' };
+  const hello = createExtensionEnvelope(ExtensionMessageType.TRANSPORT_HELLO, {
+    serverInstanceId: request.ownerServerInstanceId,
+  }, {
+    source: source(1), request: null, messageId: 'hello-command-metadata-v5',
+  });
+  assert.equal(adapter.ingest(hello, client).accepted, true);
+
+  const step = createRequestEffectDescriptor({ request, kind: 'page.ready.initial', logicalId: 'metadata-ready' });
+  const command = adapter.command({
+    type: 'prompt.send', commandId: 'command-metadata-v5', message: 'hello',
+    executionPlan: { schemaVersion: 1, requestId: request.requestId, startAtStepId: step.stepId, steps: [step] },
+    executionStepOnly: true,
+  }, {
+    commandId: 'command-metadata-v5', request,
+    source: { clientId: 'bridge-server', tabId, backgroundEpoch: request.ownerServerInstanceId, contentEpoch: '', sequence: 1 },
+  });
+  assert.equal(command.body.type, 'prompt.send');
+
+  const oldAccepted = createExtensionEnvelope(ExtensionMessageType.COMMAND_ACCEPTED, {
+    commandId: 'command-metadata-v5', commandMode: 'effect', commandScope: 'request',
+  }, {
+    source: source(2), request, commandId: 'command-metadata-v5', messageId: 'old-command-accepted-v5',
+  });
+  const accepted = adapter.ingest(oldAccepted, client);
+  assert.equal(accepted.accepted, true);
+  assert.equal(accepted.payload.commandType, 'prompt.send');
+  assert.equal(accepted.payload.effectType, 'page.ready.initial');
+  assert.equal(accepted.payload.effectId, step.effectId);
+  assert.equal(accepted.payload.requestId, request.requestId);
+});
+
 test('effect-backed command, physical effect, and accepted outbox entry commit atomically', () => {
   const state = effectCommandState();
   assert.equal(state.commands['command-steer'].status, CommandStatus.ACCEPTED);

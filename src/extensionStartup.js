@@ -26,12 +26,16 @@ export async function readBundledExtensionInfo(extensionDir = DEFAULT_EXTENSION_
   const contentPath = path.join(resolvedDir, 'content.js');
   const contentSource = await fs.readFile(contentPath, 'utf8').catch(() => '');
   const contentVersion = String(contentSource.match(/\bCONTENT_SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1] || '').trim();
+  const buildIdentityPath = path.join(resolvedDir, 'shared', 'buildIdentity.js');
+  const buildIdentitySource = await fs.readFile(buildIdentityPath, 'utf8').catch(() => '');
+  const bundleId = String(buildIdentitySource.match(/\bbundleId\s*:\s*['"]([^'"]+)['"]/)?.[1] || '').trim();
   return {
     extensionDir: resolvedDir,
     manifestPath,
     contentPath,
     version,
-    bundleId: String(manifest?.version_name || '').trim(),
+    bundleId,
+    buildIdentityPath,
     contentVersion,
     name: String(manifest.name || 'ChatGPT Browser Bridge'),
   };
