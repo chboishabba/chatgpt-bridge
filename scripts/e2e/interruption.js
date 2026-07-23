@@ -80,6 +80,57 @@ export function createE2eSignalCoordinator({
   };
 }
 
+export async function terminateOwnedChild(child, {
+  signal = 'SIGTERM',
+  timeoutMs = 5_000,
+} = {}) {
+  if (!child) return Object.freeze({ exited: true, alreadyExited: true, code: null, signal: null });
+  if (child.exitCode != null || child.signalCode) {
+    return Object.freeze({
+      exited: true,
+      alreadyExited: true,
+      code: child.exitCode ?? null,
+      signal: child.signalCode || null,
+    });
+  }
+
+  let timer = null;
+  let onExit = null;
+  const exitPromise = new Promise((resolve) => {
+    onExit = (code, childSignal) => resolve(Object.freeze({
+      exited: true,
+      alreadyExited: false,
+      code: code ?? null,
+      signal: childSignal || null,
+    }));
+    child.once('exit', onExit);
+  });
+  const timeoutPromise = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(Object.freeze({
+      exited: false,
+      alreadyExited: false,
+      code: child.exitCode ?? null,
+      signal: child.signalCode || null,
+    })), Math.max(0, Number(timeoutMs) || 0));
+  });
+
+  try {
+    child.kill(signal);
+    if (child.exitCode != null || child.signalCode) {
+      return Object.freeze({
+        exited: true,
+        alreadyExited: false,
+        code: child.exitCode ?? null,
+        signal: child.signalCode || null,
+      });
+    }
+    return await Promise.race([exitPromise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onExit) child.off?.('exit', onExit);
+  }
+}
+
 export function ownedBridgeSpawnOptions(options = {}, platform = process.platform) {
   return {
     ...options,

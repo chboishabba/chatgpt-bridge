@@ -158,6 +158,17 @@ export function applyObservation(state, event) {
     };
   }
 
+  if (data.conversationCanonicalized === true) {
+    diagnostics.push({
+      code: 'conversation_id_canonicalized',
+      message: `Accepted ChatGPT conversation canonicalization ${String(data.previousConversationId || '')} -> ${String(data.conversationId || '')}`,
+      data: {
+        previousConversationId: String(data.previousConversationId || ''),
+        conversationId: String(data.conversationId || ''),
+        submittedUserTurnKey: String(data.submittedUserTurnKey || ''),
+      },
+    });
+  }
   if (data.conversationChanged === true) {
     return terminalResult(next, RequestTerminalCode.CONVERSATION_CHANGED, 'Bound ChatGPT conversation changed', data, event, diagnostics);
   }

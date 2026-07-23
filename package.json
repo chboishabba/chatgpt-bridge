@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-browser-bridge-node",
-  "version": "6.3.2",
+  "version": "6.3.3",
   "description": "Local HTTP/OpenAI-compatible bridge for a logged-in ChatGPT tab using a Chrome/Chromium extension companion.",
   "type": "module",
   "main": "src/index.js",
@@ -44,7 +44,7 @@
     "test:e2e:capture-dom": "node -e \"require('node:fs').rmSync('test/fixtures/chat-dom/captured/generated',{recursive:true,force:true})\" && node scripts/e2e-real.js --scenario response-markdown --scenario reasoning-lifecycle --scenario zip-artifact --capture-dom-fixtures --fixture-output-dir test/fixtures/chat-dom/captured/generated",
     "test:e2e:workflow-multi-bridge": "node scripts/e2e-real.js --scenario workflow-multi-bridge",
     "workflow:worker": "node scripts/workflow-worker.js",
-    "test:e2e:local": "npm run test:e2e:local:fixtures && npm run test:e2e:mock",
+    "test:e2e:local": "npm run test:e2e:local:fixtures && npm run test:e2e:local:extension-reload && npm run test:e2e:mock",
     "check:package": "node scripts/check-package.js",
     "test:faults": "node --test test/workflowEffectFaultInjection.test.js test/backgroundFaultInjectionMatrix.test.js test/browserEffectReconciliationMatrix.test.js test/workflowControlFaultMatrix.test.js test/requestFaultInjectionMatrix.test.js test/requestDeadlinePolicy.test.js test/workflowLocalEffectFaultMatrix.test.js test/remoteWorkflowBridge.test.js test/extensionDownloadCapture.test.js test/extensionContentRuntimeErrors.test.js test/commandReleaseAndReloadRegression.test.js test/intelligenceSurfaceSelection.test.js test/requestStateCanonicalBridge.test.js test/pageLayoutCapture.test.js test/workflowHydrationBarrier.test.js test/tabObservationCore.test.js test/extensionObservationPerformance.test.js test/tabObservationAdapter.test.js test/extensionDeployment.test.js test/extensionStartup.test.js test/e2eInterruption.test.js test/requestReloadProjectionRecovery.test.js test/requestMonitorBoundary.test.js test/e2eScenarioTimeouts.test.js test/architectureHardCut.test.js test/maintenanceOperationState.test.js test/protocolV5Trace.test.js test/workflowInputOverflow.test.js test/workflowManualLocalEffect.test.js test/requestTelemetryPersistence.test.js test/workflowNotificationSuppression.test.js test/backgroundStateCompaction.test.js test/outboxDurabilityRegression.test.js",
     "verify:extension": "node scripts/verify-extension-deployment.js",
@@ -57,7 +57,8 @@
     "test:e2e:local:workflows": "node scripts/e2e-real.js --mock-chatgpt --no-reload-extension --scenario workflows",
     "test:e2e:mock": "node scripts/e2e-real.js --mock-chatgpt --no-reload-extension",
     "test:e2e:sandbox": "node scripts/sandbox-e2e.js",
-    "test:e2e:sandbox:full": "node scripts/sandbox-e2e.js --require-full"
+    "test:e2e:sandbox:full": "node scripts/sandbox-e2e.js --require-full",
+    "test:e2e:local:extension-reload": "node scripts/e2e-real.js --mock-chatgpt --force-reload-extension --scenario conversation"
   },
   "engines": {
     "node": ">=20"

@@ -58,7 +58,7 @@ export class HubClientMessageRouter {
     client.lastSeenAt = Date.now();
     this.recordDebugEvent(client.id, { ...payload, protocolMessageId: envelope.messageId, protocolMessageType: envelope.messageType });
     if (!this.preflight(client, payload, envelope).accepted) return false;
-    if (payload.type === 'hello') return this.#hello(client, payload);
+    if (payload.type === 'hello') return this.#hello(client, payload, envelope);
     if (payload.type === 'tab.observation') return this.#observation(client, payload, envelope);
     if (payload.type === 'pong' || payload.type === 'page.status') return this.#status(client, payload, envelope);
     if (payload.type === 'page.changed') return this.#pageChanged(client, payload, envelope);
@@ -75,7 +75,7 @@ export class HubClientMessageRouter {
     return undefined;
   }
 
-  #hello(client, payload) {
+  #hello(client, payload, envelope) {
     const oldId = client.id;
     const newId = typeof payload.clientId === 'string' && payload.clientId ? payload.clientId : oldId;
     if (newId !== oldId) {
@@ -98,6 +98,8 @@ export class HubClientMessageRouter {
     client.extensionVersion = String(payload.extensionVersion || client.extensionVersion || '');
     client.extensionBundleId = String(payload.extensionBundleId || client.extensionBundleId || '');
     client.extensionProtocolVersion = Number(payload.extensionProtocolVersion ?? payload.protocolVersion ?? client.extensionProtocolVersion ?? 0) || 0;
+    client.backgroundEpoch = String(envelope?.source?.backgroundEpoch || client.backgroundEpoch || '');
+    client.contentEpoch = String(envelope?.source?.contentEpoch || client.contentEpoch || '');
     client.compatibility = evaluateExtensionCompatibility(client);
     client.capabilities = payload.capabilities && typeof payload.capabilities === 'object' ? payload.capabilities : {};
     client.transportHealth = payload.transportHealth && typeof payload.transportHealth === 'object' ? structuredClone(payload.transportHealth) : null;

@@ -41,6 +41,7 @@ export function parseArgs(argv) {
     fixtureOutputDir: '',
     capturePageLayout: false,
     extensionReloadPolicy: process.env.E2E_EXTENSION_RELOAD || 'ask',
+    extensionReloadPolicyExplicit: Boolean(process.env.E2E_EXTENSION_RELOAD),
     mockChatGpt: process.env.E2E_MOCK_CHATGPT === '1',
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -71,9 +72,9 @@ export function parseArgs(argv) {
     else if (arg === '--fixture-output-dir') { options.fixtureOutputDir = path.resolve(next()); options.captureDomFixtures = true; }
     else if (arg === '--no-start-server') options.autoStartServer = false;
     else if (arg === '--no-open-browser') options.autoOpenBrowser = false;
-    else if (arg === '--reload-extension') options.extensionReloadPolicy = 'if-needed';
-    else if (arg === '--force-reload-extension') options.extensionReloadPolicy = 'always';
-    else if (arg === '--no-reload-extension') options.extensionReloadPolicy = 'never';
+    else if (arg === '--reload-extension') { options.extensionReloadPolicy = 'if-needed'; options.extensionReloadPolicyExplicit = true; }
+    else if (arg === '--force-reload-extension') { options.extensionReloadPolicy = 'always'; options.extensionReloadPolicyExplicit = true; }
+    else if (arg === '--no-reload-extension') { options.extensionReloadPolicy = 'never'; options.extensionReloadPolicyExplicit = true; }
     else if (arg === '--mock-chatgpt' || arg === '--local-chatgpt') options.mockChatGpt = true;
     else if (arg === '--list-scenarios') options.listScenarios = true;
     else if (arg === '--color') options.colorMode = 'always';
@@ -84,7 +85,7 @@ export function parseArgs(argv) {
   options.baseUrl = String(options.baseUrl || '').replace(/\/$/, '');
   if (options.mockChatGpt) {
     options.autoOpenBrowser = false;
-    options.extensionReloadPolicy = 'never';
+    if (!options.extensionReloadPolicyExplicit) options.extensionReloadPolicy = 'never';
     options.tabSettleMs = Math.min(Number(options.tabSettleMs) || 0, 100);
     if (!options.reportDirExplicit) options.reportDir = path.join(process.cwd(), '.bridge-data', 'e2e', 'last-local-e2e');
   }

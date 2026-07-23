@@ -357,6 +357,7 @@ test('extension reload waits for the server ACK of its durable command acceptanc
   assert.ok(accepted, 'Reload command acceptance must be durable before maintenance scheduling');
 
   let reloads = 0;
+  const recoveryWakes = [];
   const coordinator = createExtensionReloadCoordinator({
     backgroundState: h.backgroundState,
     maintenanceOperations: createMaintenanceOperationStore(localStorage),
@@ -367,17 +368,22 @@ test('extension reload waits for the server ACK of its durable command acceptanc
     async reloadTab() {},
     launchTokenPattern: /^bridge-[a-z0-9_-]+$/i,
     reloadRuntime() { reloads += 1; },
+    async scheduleRecoveryWake(alarmName) {
+      recoveryWakes.push(alarmName);
+      return { armed: true, alarmName, when: Date.now() + 750 };
+    },
     ackTimeoutMs: 1_000,
   });
-  await coordinator.scheduleExtensionReload({
+  const scheduled = await coordinator.scheduleExtensionReload({
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.4',
+    expectedVersion: '2.3.5',
   });
 
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(reloads, 0, 'Runtime must remain alive until the server acknowledges command acceptance');
+  assert.equal(recoveryWakes.length, 0, 'Recovery alarm must not be armed before the accepted result is acknowledged');
 
   const ack = createExtensionEnvelope(ExtensionMessageType.TRANSPORT_ACK, {
     ackMessageId: accepted.messageId,
@@ -397,6 +403,10 @@ test('extension reload waits for the server ACK of its durable command acceptanc
   });
   await handleServerEnvelope({ ...h, envelope: ack });
   await waitFor(() => reloads === 1);
+  assert.deepEqual(recoveryWakes, [`chatgptBridge:extensionReload:${scheduled.operationId}`]);
+  const pendingReload = (await localStorage.get('bridgePendingExtensionReload')).bridgePendingExtensionReload;
+  assert.equal(pendingReload.recoveryAlarmName, recoveryWakes[0]);
+  assert.ok(Number(pendingReload.recoveryWakeAt) > Date.now());
   runtime = await h.backgroundState.read(h.state.tabId);
   assert.equal(runtime.outbox.some((entry) => entry.messageId === accepted.messageId), false);
   assert.equal(runtime.commands['reload-ack-command'].status, 'dispatched');

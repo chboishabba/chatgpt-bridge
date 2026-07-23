@@ -201,6 +201,7 @@ export class MockChatGptStateMachine {
     this.selectedEffort = 'high';
     this.sessions = new Map();
     this.sessionId = `mock-${randomUUID()}`;
+    this.visibleConversationId = '';
     this.sessions.set(this.sessionId, { id: this.sessionId, title: 'Local E2E conversation', turns: [] });
     this.activeRequest = null;
     this.generating = false;
@@ -214,8 +215,33 @@ export class MockChatGptStateMachine {
   }
 
   get session() { return this.sessions.get(this.sessionId); }
-  get url() { return `${this.origin}/c/${this.sessionId}`; }
+  get conversationId() { return this.visibleConversationId; }
+  get url() { return this.visibleConversationId ? `${this.origin}/c/${this.visibleConversationId}` : `${this.origin}/`; }
   get turns() { return this.session?.turns || []; }
+
+  sessionProjection() {
+    return {
+      id: this.visibleConversationId || 'new',
+      url: this.url,
+      title: this.session?.title || 'Local E2E conversation',
+      active: true,
+    };
+  }
+
+  beginConversationCanonicalization() {
+    if (this.visibleConversationId) return null;
+    const temporaryId = `WEB:${randomUUID()}`;
+    this.visibleConversationId = temporaryId;
+    this.revision += 1;
+    return { temporaryId, canonicalId: this.sessionId };
+  }
+
+  completeConversationCanonicalization(expectedTemporaryId = '') {
+    if (!expectedTemporaryId || this.visibleConversationId !== expectedTemporaryId) return false;
+    this.visibleConversationId = this.sessionId;
+    this.revision += 1;
+    return true;
+  }
 
   publicState() {
     return {
@@ -223,10 +249,10 @@ export class MockChatGptStateMachine {
       revision: this.revision,
       title: 'Mock ChatGPT — Local E2E',
       phase: this.phase,
-      sessionId: this.sessionId,
+      sessionId: this.visibleConversationId || 'new',
       selectedModel: this.selectedModel,
       selectedEffort: this.selectedEffort,
-      sessions: Array.from(this.sessions.values()).map(({ id, title }) => ({ id, title, url: `${this.origin}/c/${id}`, active: id === this.sessionId })),
+      sessions: Array.from(this.sessions.values()).map(({ id, title }) => ({ id, title, url: `${this.origin}/c/${id}`, active: id === this.sessionId && this.visibleConversationId === id })),
       turns: this.turns.map((turn) => ({
         ...turn,
         artifacts: (turn.artifacts || []).map(({ buffer, ...item }) => ({
@@ -242,17 +268,19 @@ export class MockChatGptStateMachine {
   newSession() {
     this.attachments = [];
     this.sessionId = `mock-${randomUUID()}`;
+    this.visibleConversationId = '';
     this.sessions.set(this.sessionId, { id: this.sessionId, title: `Conversation ${this.sessions.size + 1}`, turns: [] });
     this.revision += 1;
-    return { id: this.sessionId, url: this.url, title: this.session.title, active: true };
+    return this.sessionProjection();
   }
 
   selectSession(sessionId) {
     this.attachments = [];
     if (!this.sessions.has(sessionId)) this.sessions.set(sessionId, { id: sessionId, title: `Conversation ${sessionId}`, turns: [] });
     this.sessionId = sessionId;
+    this.visibleConversationId = sessionId;
     this.revision += 1;
-    return { id: this.sessionId, url: this.url, title: this.session.title, active: true };
+    return this.sessionProjection();
   }
 
   deleteSession(sessionId) {
@@ -260,8 +288,10 @@ export class MockChatGptStateMachine {
     const beforeUrl = this.url;
     this.sessions.delete(sessionId);
     const next = this.sessions.keys().next().value;
-    if (next) this.sessionId = next;
-    else this.newSession();
+    if (next) {
+      this.sessionId = next;
+      this.visibleConversationId = next;
+    } else this.newSession();
     this.revision += 1;
     return { deleted: true, deletedSessionId: sessionId, beforeUrl, afterUrl: this.url };
   }

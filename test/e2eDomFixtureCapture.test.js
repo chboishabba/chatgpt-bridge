@@ -285,4 +285,6 @@ test('real E2E CLI controls startup extension reload policy', () => {
   assert.equal(parseArgs(['--reload-extension']).extensionReloadPolicy, 'if-needed');
   assert.equal(parseArgs(['--force-reload-extension']).extensionReloadPolicy, 'always');
   assert.equal(parseArgs(['--no-reload-extension']).extensionReloadPolicy, 'never');
+  assert.equal(parseArgs(['--mock-chatgpt']).extensionReloadPolicy, 'never');
+  assert.equal(parseArgs(['--mock-chatgpt', '--force-reload-extension']).extensionReloadPolicy, 'always');
 });

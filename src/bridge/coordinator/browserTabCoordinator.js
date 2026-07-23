@@ -116,7 +116,7 @@ export class BrowserTabCoordinator {
         return `${candidate.id || 'unknown'} url=${candidate.url || '(empty)'} reportedToken=${candidate.launchToken ? 'yes' : 'no'} urlToken=${urlToken ? 'yes' : 'no'} extension=${candidate.extensionVersion || '?'} content=${candidate.clientVersion || '?'}`;
       });
       const suffix = observed.length ? ` Observed clients: ${observed.join('; ')}` : ' No clients connected to this bridge instance.';
-      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.4 with content runtime 4.3.3 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
+      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.5 with content runtime 4.3.4 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
     });
     const launchedClient = normalizeLaunchedClient(client, launchToken);
     return {
@@ -195,6 +195,13 @@ export class BrowserTabCoordinator {
     const timeoutMs = Math.max(2_000, Number(options.timeoutMs) || 20_000);
     const requestedAt = Date.now();
     const reloadServerUrl = options.serverUrl || this.runtimeOptions.publicBaseUrl;
+    const maintenanceBootstrapUrl = options.allowMaintenancePageBootstrap === true && !before.activeRequest?.requestId
+      ? extensionMaintenanceReloadUrl(before, {
+          expectedVersion,
+          reloadTabs: options.reloadTabs !== false,
+          serverUrl: reloadServerUrl,
+        })
+      : '';
     let cancelWait = () => {};
     const reconnectPromise = new Promise((resolve, reject) => {
       const check = (client) => {
@@ -258,20 +265,13 @@ export class BrowserTabCoordinator {
       throw first.error;
     }
     if (first.kind === 'command_error') {
-      const fallbackUrl = options.allowMaintenancePageBootstrap === true && !before.activeRequest?.requestId
-        ? extensionMaintenanceReloadUrl(before, {
-            expectedVersion,
-            reloadTabs: options.reloadTabs !== false,
-            serverUrl: reloadServerUrl,
-          })
-        : '';
-      if (!fallbackUrl) {
+      if (!maintenanceBootstrapUrl) {
         cancelWait();
         reconnectPromise.catch(() => {});
         throw first.error;
       }
       try {
-        await this.runtimeOptions.openExternalUrl(fallbackUrl, { allowExtensionMaintenance: true });
+        await this.runtimeOptions.openExternalUrl(maintenanceBootstrapUrl, { allowExtensionMaintenance: true });
         return {
           accepted: { scheduled: true, bootstrapPage: true, inferredFromReconnect: true, commandError: first.error?.message || String(first.error) },
           reconnected: await reconnectPromise,
@@ -291,15 +291,55 @@ export class BrowserTabCoordinator {
     const ownedTabRecovery = options.reloadTabs !== false
       && Number.isInteger(Number(before.browserTabId))
       && BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || ''));
-    if (!ownedTabRecovery) return { accepted, reconnected: await reconnectPromise };
-
     const pageReloadArmed = accepted?.pageReload?.armed === true;
-    const graceMs = Math.max(1_500, Math.min(timeoutMs - 1_000, pageReloadArmed ? 12_000 : 3_000));
+    const recoveryWakeArmed = accepted?.recoveryWake?.armed === true || accepted?.recoveryAlarm?.armed === true;
+    const graceMs = Math.max(1_000, Math.min(timeoutMs - 750, pageReloadArmed || recoveryWakeArmed ? 5_000 : 2_000));
     const originalReconnect = await Promise.race([
       reconnectPromise,
       new Promise((resolve) => setTimeout(() => resolve(null), graceMs)),
     ]);
     if (originalReconnect) return { accepted, reconnected: originalReconnect };
+
+    // A successful command result only proves that the old service worker
+    // scheduled its own restart. It does not prove that Chrome injected the
+    // updated content script into the already-open ChatGPT tab. Older bundles
+    // could acknowledge the command and then disappear before their page timer
+    // fired, leaving the user with a stale page that required a manual refresh.
+    // Open the deployed maintenance page after a short reconnect grace even
+    // when the protocol command succeeded. The page runs in the new extension
+    // package and can reload the source tab independently of the dead worker.
+    let maintenanceBootstrapError = null;
+    if (maintenanceBootstrapUrl) {
+      try {
+        await this.runtimeOptions.openExternalUrl(maintenanceBootstrapUrl, { allowExtensionMaintenance: true });
+        const maintenanceGraceMs = Math.max(750, Math.min(5_000, timeoutMs - (Date.now() - requestedAt) - 500));
+        const maintenanceReconnect = await Promise.race([
+          reconnectPromise,
+          new Promise((resolve) => setTimeout(() => resolve(null), maintenanceGraceMs)),
+        ]);
+        if (maintenanceReconnect) {
+          return {
+            accepted: { ...accepted, bootstrapPage: true },
+            reconnected: maintenanceReconnect,
+            recovery: { used: true, reason: 'maintenance_page_after_stalled_command' },
+          };
+        }
+      } catch (error) {
+        maintenanceBootstrapError = error;
+      }
+    }
+
+    if (!ownedTabRecovery) {
+      if (maintenanceBootstrapError) {
+        cancelWait();
+        reconnectPromise.catch(() => {});
+        const wrapped = new Error(`Extension reload was accepted, but the maintenance bootstrap failed before the tab reconnected: ${maintenanceBootstrapError?.message || maintenanceBootstrapError}`);
+        wrapped.code = 'EXTENSION_RELOAD_BOOTSTRAP_FAILED';
+        wrapped.cause = maintenanceBootstrapError;
+        throw wrapped;
+      }
+      return { accepted, reconnected: await reconnectPromise };
+    }
 
     cancelWait();
     reconnectPromise.catch(() => {});
@@ -332,7 +372,9 @@ export class BrowserTabCoordinator {
       reconnected: replacement.client,
       recovery: {
         used: true,
-        reason: pageReloadArmed ? 'owned_tab_did_not_reconnect' : 'page_reload_not_armed',
+        reason: maintenanceBootstrapError
+          ? 'maintenance_page_failed'
+          : (pageReloadArmed || recoveryWakeArmed ? 'owned_tab_did_not_reconnect' : 'page_reload_not_armed'),
         replacedTabId: Number(before.browserTabId),
         replacementTabId: Number(replacement.client.browserTabId),
         launchToken: recoveryLaunchToken,

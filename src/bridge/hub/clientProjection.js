@@ -72,6 +72,8 @@ export function publicClientProjection(client, { selectedClientId = '', serverIn
     extensionVersion: client.extensionVersion || '',
     extensionBundleId: client.extensionBundleId || '',
     extensionProtocolVersion: client.extensionProtocolVersion || 0,
+    backgroundEpoch: client.backgroundEpoch || '',
+    contentEpoch: client.contentEpoch || '',
     compatibility: client.compatibility || null,
     compatible: client.compatibility?.compatible !== false,
     origin: client.origin,

@@ -71,6 +71,19 @@ export async function prepareIsolatedE2eTab(options, { api, waitUntil, testLog, 
   assert(readinessVersion !== null && readinessVersion >= 0,
     `Real E2E requires content runtime ${EXTENSION_COMPATIBILITY.minContentVersion}+ from extension ${EXTENSION_COMPATIBILITY.minExtensionVersion}+; got ${readyClient.clientVersion || 'unknown'}. Reload the unpacked extension and reload ChatGPT tabs.`);
 
+  if (extensionStartupReload?.status === 'reloaded') {
+    assert(readyClient.backgroundEpoch, 'Extension reload reconnected without a background runtime epoch');
+    assert(readyClient.contentEpoch, 'Extension reload reconnected without a content runtime epoch');
+    assert.notEqual(readyClient.backgroundEpoch, opened.client.backgroundEpoch,
+      'Extension reload did not replace the background service worker epoch');
+    assert.notEqual(readyClient.contentEpoch, opened.client.contentEpoch,
+      'Extension reload did not replace the page content runtime; automatic page refresh did not complete');
+    testLog('ok', 'extension-reload', 'Automatic page refresh replaced both extension runtime epochs', {
+      backgroundEpoch: readyClient.backgroundEpoch,
+      contentEpoch: readyClient.contentEpoch,
+    });
+  }
+
   await api(options, '/browser/select', { method: 'POST', body: { clientId: readyClient.id } });
   if (options.tabSettleMs) {
     step(`ChatGPT composer is ready; settling for ${options.tabSettleMs}ms`);

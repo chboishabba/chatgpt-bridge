@@ -140,6 +140,7 @@ export class ExtensionDeployer {
         sourceClientId,
         reloadTabs: cfg.reloadTabs,
         expectedVersion: manifest.version,
+        allowMaintenancePageBootstrap: true,
         timeoutMs: cfg.reconnectTimeoutMs,
       });
       if (swap?.displacedDir) await fs.rm(swap.displacedDir, { recursive: true, force: true });
@@ -189,6 +190,7 @@ export class ExtensionDeployer {
           sourceClientId,
           reloadTabs: cfg.reloadTabs,
           expectedVersion: backup.manifestVersion,
+          allowMaintenancePageBootstrap: true,
           timeoutMs: cfg.reconnectTimeoutMs,
         }).catch((error) => ({ error: error.message || String(error) }));
       }

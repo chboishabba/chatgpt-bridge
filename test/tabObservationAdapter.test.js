@@ -99,6 +99,60 @@ test('tab observation detects incompatible request and conversation immediately'
   assert.equal(event.data.requestReplaced, true);
 });
 
+test('temporary WEB conversation id is promoted to the canonical id inside the same request boundary', () => {
+  const event = tabObservationToCanonicalEvent('req-1', 'client-1', {
+    observation: observation({
+      url: 'https://chatgpt.com/c/6a61d754-e0a4-83ed-a9d9-814a7bcdc8b6',
+      conversationId: '6a61d754-e0a4-83ed-a9d9-814a7bcdc8b6',
+      activeRequest: { requestId: 'req-1', submittedUserTurnKey: 'user-1', responseEpoch: 0 },
+      turn: { key: 'assistant-1', userKey: 'user-1', index: 1 },
+    }),
+  }, {
+    source: { conversationId: 'WEB:5e28091a-3aca-4d27-bd8c-c1ff91440544' },
+    submission: 'submitted',
+    response: { epoch: 0, userTurnKey: 'user-1' },
+  }, 110);
+
+  assert.equal(event.data.conversationCanonicalized, true);
+  assert.equal(event.data.previousConversationId, 'WEB:5e28091a-3aca-4d27-bd8c-c1ff91440544');
+  assert.equal(event.data.conversationChanged, false);
+  assert.equal(event.data.scopedToRequest, true);
+});
+
+test('temporary WEB conversation id still rejects a different conversation without the same turn boundary', () => {
+  const event = tabObservationToCanonicalEvent('req-1', 'client-1', {
+    observation: observation({
+      conversationId: 'different-conversation',
+      activeRequest: { requestId: 'req-1', submittedUserTurnKey: 'user-other', responseEpoch: 0 },
+      turn: { key: 'assistant-other', userKey: 'user-other', index: 1 },
+    }),
+  }, {
+    source: { conversationId: 'WEB:5e28091a-3aca-4d27-bd8c-c1ff91440544' },
+    submission: 'submitted',
+    response: { epoch: 0, userTurnKey: 'user-1' },
+  }, 110);
+
+  assert.equal(event.data.conversationCanonicalized, false);
+  assert.equal(event.data.conversationChanged, true);
+});
+
+test('temporary WEB conversation id rejects a conflicting visible turn even when content retains the old request key', () => {
+  const event = tabObservationToCanonicalEvent('req-1', 'client-1', {
+    observation: observation({
+      conversationId: 'different-conversation',
+      activeRequest: { requestId: 'req-1', submittedUserTurnKey: 'user-1', responseEpoch: 0 },
+      turn: { key: 'assistant-other', userKey: 'user-other', index: 1 },
+    }),
+  }, {
+    source: { conversationId: 'WEB:5e28091a-3aca-4d27-bd8c-c1ff91440544' },
+    submission: 'submitted',
+    response: { epoch: 0, userTurnKey: 'user-1' },
+  }, 110);
+
+  assert.equal(event.data.conversationCanonicalized, false);
+  assert.equal(event.data.conversationChanged, true);
+});
+
 test('observation sequence resets are accepted after a new observer epoch', () => {
   const create = {
     schemaVersion: 1,

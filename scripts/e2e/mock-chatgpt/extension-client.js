@@ -61,6 +61,8 @@ export class MockExtensionTab extends EventEmitter {
     this.commandJournal = [];
     this.effectJournal = new Map();
     this.pendingTransportAcks = new Map();
+    this.extensionReloadCount = 0;
+    this.pageReloadCount = 0;
   }
 
   publicLayoutUrl() {
@@ -88,9 +90,9 @@ export class MockExtensionTab extends EventEmitter {
       browserTabId: this.tabId,
       launchToken: this.launchToken,
       requestedUrl: this.requestedUrl,
-      clientVersion: '4.3.3',
-      extensionVersion: '2.3.4',
-      extensionBundleId: 'd54b18fd99b64d14a2c7e7c14d5f632a',
+      clientVersion: '4.3.4',
+      extensionVersion: '2.3.5',
+      extensionBundleId: '51eb649412d74e0da0449b9f78c4f5b2',
       extensionProtocolVersion: 5,
       visibilityState: 'visible',
       focused: true,
@@ -99,7 +101,7 @@ export class MockExtensionTab extends EventEmitter {
       composerReady: true,
       chatMainReady: true,
       activeRequest: this.state.activeRequest,
-      session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || 'Local E2E', active: true },
+      session: this.state.sessionProjection(),
       capabilities: {
         browserTabs: true,
         sessionDeletion: true,
@@ -110,7 +112,12 @@ export class MockExtensionTab extends EventEmitter {
         passiveObservation: true,
         protocol5: true,
       },
-      mock: { enabled: true, layoutUrl: this.publicLayoutUrl() },
+      mock: {
+        enabled: true,
+        layoutUrl: this.publicLayoutUrl(),
+        extensionReloadCount: this.extensionReloadCount,
+        pageReloadCount: this.pageReloadCount,
+      },
     };
   }
 
@@ -311,7 +318,7 @@ export class MockExtensionTab extends EventEmitter {
           : { reconciliationOutcome: 'uncertain', reconciliationReason: 'mock_effect_ledger_missing', evidence: { effectId: text(body.effectId) } });
       }
       if (type === 'passive.prompt.submit') return await this.#passivePrompt(envelope);
-      if (type === 'sessions.list') return await this.#result(envelope, 'sessions.list', { sessions: this.state.publicState().sessions, currentSessionId: this.state.sessionId });
+      if (type === 'sessions.list') return await this.#result(envelope, 'sessions.list', { sessions: this.state.publicState().sessions, currentSessionId: this.state.conversationId || 'new' });
       if (type === 'sessions.new') {
         const session = this.state.newSession();
         await this.publishObservation('sessions.new');
@@ -339,8 +346,21 @@ export class MockExtensionTab extends EventEmitter {
         return;
       }
       if (type === 'extension.reload') {
-        await this.#result(envelope, 'extension.reload.accepted', { accepted: true, expectedVersion: body.expectedVersion || '2.3.4' });
-        setTimeout(() => { void this.reconnect({ replaceBackground: true, replaceContent: true }); }, 35);
+        this.extensionReloadCount += 1;
+        await this.#result(envelope, 'extension.reload.accepted', {
+          accepted: true,
+          scheduled: true,
+          expectedVersion: body.expectedVersion || '2.3.5',
+          pageReload: { armed: true, owner: 'mock-recovery-alarm' },
+          recoveryWake: { armed: true, owner: 'mock-extension-alarm' },
+        });
+        // Match the real lifecycle: the acknowledged background worker goes
+        // away first, then an independent recovery wake reloads the document
+        // so both the background and content epochs are replaced.
+        setTimeout(() => {
+          this.pageReloadCount += 1;
+          void this.reconnect({ replaceBackground: true, replaceContent: true });
+        }, 850);
         return;
       }
       if (type === 'debug.layout.capture') {
@@ -371,12 +391,12 @@ export class MockExtensionTab extends EventEmitter {
       }
       if (type === 'response.recover.latest') {
         return await this.#result(envelope, 'response.recovered.latest', this.#recoveredCandidate() || {
-          answer: '', artifacts: [], session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '' }, url: this.state.url, title: 'ChatGPT',
+          answer: '', artifacts: [], session: this.state.sessionProjection(), url: this.state.url, title: 'ChatGPT',
         });
       }
       if (type === 'response.recover.turnKey') {
         return await this.#result(envelope, 'response.recovered.turnKey', this.#recoveredCandidate(text(body.turnKey)) || {
-          answer: '', artifacts: [], turnKey: text(body.turnKey), session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '' }, url: this.state.url, title: 'ChatGPT', reason: 'turn_not_found',
+          answer: '', artifacts: [], turnKey: text(body.turnKey), session: this.state.sessionProjection(), url: this.state.url, title: 'ChatGPT', reason: 'turn_not_found',
         });
       }
       if (type === 'command.cancel') return await this.#result(envelope, 'command.cancelled', { targetCommandId: body.targetCommandId, cancelled: true });
@@ -398,7 +418,7 @@ export class MockExtensionTab extends EventEmitter {
         ? this.state.newSession()
         : body.options?.sessionId
           ? this.state.selectSession(body.options.sessionId)
-          : { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '', active: true };
+          : this.state.sessionProjection();
       preparationResult = preparationEffectResult(step.kind, { session });
     } else if (step.kind === 'model.apply') {
       const intelligence = this.state.setIntelligence(body.options || {});
@@ -413,11 +433,18 @@ export class MockExtensionTab extends EventEmitter {
       return;
     }
 
+    const conversationTransition = this.state.beginConversationCanonicalization();
     const userKey = this.state.appendUser(body.message, request);
     this.state.activeRequest = { ...request, submittedUserTurnKey: userKey };
     this.lastPrompt = String(body.message || '');
     await this.publishObservation('prompt.user-appended');
-    await this.#effect(envelope, step, { submitted: true, submittedUserTurnKey: userKey, session: { id: this.state.sessionId, url: this.state.url } });
+    await this.#effect(envelope, step, { submitted: true, submittedUserTurnKey: userKey, session: this.state.sessionProjection() });
+    if (conversationTransition) {
+      setTimeout(() => {
+        if (!this.state.completeConversationCanonicalization(conversationTransition.temporaryId)) return;
+        void this.publishObservation('conversation.canonicalized');
+      }, 45);
+    }
     this.currentGeneration = this.state.generate(this.lastPrompt, {
       request,
       onChange: async (reason) => await this.publishObservation(reason),
@@ -465,14 +492,21 @@ export class MockExtensionTab extends EventEmitter {
     if (body.options?.newSession) this.state.newSession();
     else if (body.options?.sessionId) this.state.selectSession(body.options.sessionId);
     if (body.options?.model || body.options?.effort) this.state.setIntelligence(body.options);
+    const conversationTransition = this.state.beginConversationCanonicalization();
     const userKey = this.state.appendUser(body.message, null);
     await this.publishObservation('passive.user-appended');
     await this.#result(envelope, 'passive.prompt.submitted', {
       submittedUserTurnKey: userKey,
-      session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '' },
+      session: this.state.sessionProjection(),
       url: this.state.url,
       title: 'ChatGPT',
     });
+    if (conversationTransition) {
+      setTimeout(() => {
+        if (!this.state.completeConversationCanonicalization(conversationTransition.temporaryId)) return;
+        void this.publishObservation('passive.conversation.canonicalized');
+      }, 45);
+    }
     const previousGeneration = this.currentGeneration;
     this.currentGeneration = (async () => {
       await previousGeneration?.catch?.(() => null);
@@ -544,7 +578,7 @@ export class MockExtensionTab extends EventEmitter {
       codeBlocks: assistant === projection.assistant ? projection.codeBlocks : [],
       parserAudit: assistant === projection.assistant ? projection.parserAudit : null,
       artifacts,
-      session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '', active: true },
+      session: this.state.sessionProjection(),
       url: this.state.url,
       title: 'ChatGPT',
       sourceClientId: this.clientId,
@@ -592,7 +626,7 @@ export class MockExtensionTab extends EventEmitter {
       stableForMs: final ? 2_000 : 0,
       url: this.state.url,
       title: 'ChatGPT',
-      conversationId: this.state.sessionId,
+      conversationId: this.state.conversationId,
       visibility: 'visible',
       focused: true,
       document: { state: 'ready', readyState: 'complete', pageReady: true, chatMainReady: true },
@@ -647,7 +681,7 @@ export class MockExtensionTab extends EventEmitter {
       observation,
       revision: observation.revision,
       reason,
-      session: { id: this.state.sessionId, url: this.state.url, title: this.state.session?.title || '', active: true },
+      session: this.state.sessionProjection(),
       url: this.state.url,
       title: 'ChatGPT',
     }, { request: this.state.activeRequest, causationId: reason || null });

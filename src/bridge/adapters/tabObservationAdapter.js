@@ -44,6 +44,21 @@ function normalizedConversationId(value = '') {
   return id === 'new' ? '' : id;
 }
 
+function isTemporaryConversationId(value = '') {
+  return /^WEB:/i.test(normalizedConversationId(value));
+}
+
+function conversationBoundaryMatches({
+  observationAppliesToRequest,
+  submittedUserTurnKey,
+  contentSubmittedUserTurnKey,
+  observedUserTurnKey,
+} = {}) {
+  if (!observationAppliesToRequest || !submittedUserTurnKey) return false;
+  if (observedUserTurnKey) return submittedUserTurnKey === observedUserTurnKey;
+  return submittedUserTurnKey === contentSubmittedUserTurnKey;
+}
+
 function canonicalSubmittedUserTurnKey(currentState = null) {
   const direct = String(currentState?.response?.userTurnKey || '');
   if (direct) return direct;
@@ -109,12 +124,24 @@ export function tabObservationToCanonicalEvent(
     && submittedUserTurnKey === observedUserTurnKey;
   const responseAppliesToRequest = observationAppliesToRequest && responseBoundaryEstablished;
   const requestReplaced = Boolean(bindingEstablished && observedRequestId && observedRequestId !== requestId);
-  const conversationChanged = Boolean(
+  const conversationIdChanged = Boolean(
     bindingEstablished
     && expectedConversationId
     && observedConversationId
-    && expectedConversationId !== observedConversationId,
+    && expectedConversationId !== observedConversationId
   );
+  const conversationCanonicalized = Boolean(
+    conversationIdChanged
+    && isTemporaryConversationId(expectedConversationId)
+    && !isTemporaryConversationId(observedConversationId)
+    && conversationBoundaryMatches({
+      observationAppliesToRequest,
+      submittedUserTurnKey,
+      contentSubmittedUserTurnKey,
+      observedUserTurnKey,
+    })
+  );
+  const conversationChanged = conversationIdChanged && !conversationCanonicalized;
   const occurredAt = Number(observation.observedAt || payload.observedAt || at) || 0;
   const observationRevision = Number(observation.revision ?? payload.revision);
   const transportSequence = Number(envelope?.source?.sequence);
@@ -168,6 +195,8 @@ export function tabObservationToCanonicalEvent(
     explicitError: observationAppliesToRequest && Boolean(observation.error?.explicit),
     errorMessage: observationAppliesToRequest ? String(observation.error?.message || '') : '',
     conversationChanged,
+    conversationCanonicalized,
+    previousConversationId: conversationCanonicalized ? expectedConversationId : '',
     requestReplaced,
     scopedToRequest: responseAppliesToRequest,
     leaseScopedToRequest: observationAppliesToRequest,

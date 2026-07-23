@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { abortableDelay, createE2eInterruptionController, createE2eSignalCoordinator, isE2eInterruption, ownedBridgeSpawnOptions } from '../scripts/e2e/interruption.js';
+import { EventEmitter } from 'node:events';
+import { abortableDelay, createE2eInterruptionController, createE2eSignalCoordinator, isE2eInterruption, ownedBridgeSpawnOptions, terminateOwnedChild } from '../scripts/e2e/interruption.js';
 import { markReportInterrupted } from '../scripts/e2e-workflow-support.js';
 import { stopInterruptedBridgeWork } from '../scripts/e2e/interrupted-cleanup.js';
 
@@ -25,6 +26,24 @@ test('the first E2E signal starts cleanup, immediate process-group duplicates ar
   now += 800;
   assert.equal(handleSignal('SIGINT'), 'forced');
   assert.deepEqual(calls, ['graceful:SIGINT', 'duplicate:SIGINT', 'forced:SIGINT']);
+});
+
+test('owned child termination observes an exit emitted synchronously by kill', async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  child.kill = (signal) => {
+    child.signalCode = signal;
+    child.emit('exit', null, signal);
+    return true;
+  };
+
+  const started = Date.now();
+  const result = await terminateOwnedChild(child, { timeoutMs: 5_000 });
+
+  assert.equal(result.exited, true);
+  assert.equal(result.signal, 'SIGTERM');
+  assert.equal(Date.now() - started < 250, true);
 });
 
 test('owned E2E bridge is isolated from terminal signals on POSIX', () => {

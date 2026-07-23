@@ -436,7 +436,8 @@ test('real E2E runner covers reasoning, steer, files, ZIP, project context, reus
   assert.match(source, /process\.env\.BRIDGE_DISABLE_NOTIFICATIONS = '1'/);
   assert.match(source, /BRIDGE_DISABLE_NOTIFICATIONS: '1'/);
   assert.equal(packageJson.scripts['test:e2e:capture-dom'], `node -e "require('node:fs').rmSync('test/fixtures/chat-dom/captured/generated',{recursive:true,force:true})" && node scripts/e2e-real.js --scenario response-markdown --scenario reasoning-lifecycle --scenario zip-artifact --capture-dom-fixtures --fixture-output-dir test/fixtures/chat-dom/captured/generated`);
-  assert.equal(packageJson.scripts['test:e2e:local'], 'npm run test:e2e:local:fixtures && npm run test:e2e:mock');
+  assert.equal(packageJson.scripts['test:e2e:local'], 'npm run test:e2e:local:fixtures && npm run test:e2e:local:extension-reload && npm run test:e2e:mock');
+  assert.equal(packageJson.scripts['test:e2e:local:extension-reload'], 'node scripts/e2e-real.js --mock-chatgpt --force-reload-extension --scenario conversation');
   assert.match(packageJson.scripts['test:e2e:local:fixtures'], /mockChatGptLayout\.test\.js/);
   assert.equal(packageJson.scripts['test:e2e:mock'], 'node scripts/e2e-real.js --mock-chatgpt --no-reload-extension');
   assert.equal(packageJson.scripts['test:e2e:response-markdown'], 'node scripts/e2e-real.js --scenario response-markdown');

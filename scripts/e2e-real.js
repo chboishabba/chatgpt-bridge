@@ -33,7 +33,7 @@ import { prepareIsolatedE2eTab } from './e2e/startup-extension.js';
 import { browserOwnershipIdentity, findOwnedBrowserClient, quiesceBrowserWork } from './e2e/scenario-recovery.js';
 import { createScenarioRunner } from './e2e/scenario-runner.js';
 import { artifactsFromTurnSnapshot, isZipArtifactCandidate } from './e2e/artifact-selection.js';
-import { abortableDelay, createE2eInterruptionController, createE2eSignalCoordinator, isE2eInterruption, ownedBridgeSpawnOptions } from './e2e/interruption.js';
+import { abortableDelay, createE2eInterruptionController, createE2eSignalCoordinator, isE2eInterruption, ownedBridgeSpawnOptions, terminateOwnedChild } from './e2e/interruption.js';
 import { stopInterruptedBridgeWork } from './e2e/interrupted-cleanup.js';
 import { initializeDiagnostics, resolveBridgeRuntime, writeDiagnosticCheckpoint } from './e2e/runtime.js';
 import { startMockChatGptRuntime, stopMockChatGptRuntime } from './e2e/mock-chatgpt/runtime.js';
@@ -977,10 +977,7 @@ async function run() {
     } finally {
       if (liveDebugTrace) await liveDebugTrace.stop().catch(() => {});
       await stopMockChatGptRuntime(mockChatGptRuntime);
-      if (ownedServer) {
-        ownedServer.kill('SIGTERM');
-        await Promise.race([new Promise((resolve) => ownedServer.once('exit', resolve)), sleep(5_000, { ignoreAbort: true })]);
-      }
+      if (ownedServer) await terminateOwnedChild(ownedServer, { signal: 'SIGTERM', timeoutMs: 5_000 });
       if (ownedServer) await fs.rm(options.serverDataDir, { recursive: true, force: true }).catch(() => {});
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
       report.failureSummary = collectE2eIssues({ report, scenarioFailures, primaryError });

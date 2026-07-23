@@ -13,7 +13,10 @@ import { serverEnvelopeQueueOptions } from './background/operationPriorityPolicy
 import { handleServerEnvelope } from './background/serverEnvelopeRouter.js';
 import { createDownloadCoordinator } from './background/downloadCoordinator.js';
 import { createMaintenanceOperationStore } from './background/maintenanceOperations.js';
-import { createExtensionReloadCoordinator } from './background/extensionReloadCoordinator.js';
+import {
+  createExtensionReloadCoordinator,
+  isExtensionReloadAlarm,
+} from './background/extensionReloadCoordinator.js';
 import { createTabController } from './background/tabController.js';
 import { checkBridgeAuth } from './background/authPreflight.js';
 const connections = new Map();
@@ -380,6 +383,11 @@ chrome.runtime.onInstalled?.addListener?.((details) => {
   if (details?.reason === 'update') void recoverPendingExtensionReload()
     .then(async (result) => { if (result?.reason === 'missing') await maintenanceOperations.recover(); })
     .catch(reportMaintenanceRecoveryFailure);
+});
+chrome.alarms?.onAlarm?.addListener?.((alarm) => {
+  if (!isExtensionReloadAlarm(alarm?.name)) return;
+  console.info('[chatgpt-bridge] Extension reload recovery alarm fired', { name: String(alarm?.name || '') });
+  void recoverPendingExtensionReload().catch(reportMaintenanceRecoveryFailure);
 });
 void recoverPendingExtensionReload()
   .then(async (result) => { if (result?.reason === 'missing') await maintenanceOperations.recover(); })

@@ -1,5 +1,15 @@
 const PENDING_EXTENSION_RELOAD_KEY = 'bridgePendingExtensionReload';
 const PENDING_EXTENSION_RELOAD_TTL_MS = 2 * 60_000;
+export const EXTENSION_RELOAD_ALARM_PREFIX = 'chatgptBridge:extensionReload:';
+
+export function extensionReloadAlarmName(operationId = '') {
+  const id = String(operationId || '').trim();
+  return id ? `${EXTENSION_RELOAD_ALARM_PREFIX}${id}` : '';
+}
+
+export function isExtensionReloadAlarm(name = '') {
+  return String(name || '').startsWith(EXTENSION_RELOAD_ALARM_PREFIX);
+}
 
 export function createExtensionReloadCoordinator({
   backgroundState,
@@ -11,9 +21,37 @@ export function createExtensionReloadCoordinator({
   reloadTab,
   launchTokenPattern,
   reloadRuntime = () => chrome.runtime.reload(),
+  scheduleRecoveryWake = null,
+  clearRecoveryWake = null,
   ackTimeoutMs = 7_000,
 } = {}) {
   let pendingRecovery = null;
+
+  async function armRecoveryWake(operationId) {
+    const alarmName = extensionReloadAlarmName(operationId);
+    if (!alarmName) return { armed: false, reason: 'missing_operation_id' };
+    if (typeof scheduleRecoveryWake === 'function') return await scheduleRecoveryWake(alarmName);
+    if (!chrome.alarms?.create) return { armed: false, reason: 'alarms_unavailable', alarmName };
+    const when = Date.now() + 750;
+    await chrome.alarms.create(alarmName, { when });
+    if (chrome.alarms.get) {
+      const alarm = await chrome.alarms.get(alarmName);
+      if (!alarm) {
+        const error = new Error('Extension reload recovery alarm was not persisted');
+        error.code = 'MAINTENANCE_ALARM_NOT_PERSISTED';
+        throw error;
+      }
+    }
+    return { armed: true, alarmName, when };
+  }
+
+  async function disarmRecoveryWake(alarmName = '') {
+    const name = String(alarmName || '');
+    if (!name) return false;
+    if (typeof clearRecoveryWake === 'function') return await clearRecoveryWake(name);
+    if (!chrome.alarms?.clear) return false;
+    return await chrome.alarms.clear(name);
+  }
 
   function temporaryReloadUrl(rawUrl = '', serverUrl = '', launchToken = '') {
     try {
@@ -84,6 +122,7 @@ export function createExtensionReloadCoordinator({
     const requestedAt = Number(pending.requestedAt || 0);
     if (!requestedAt || Date.now() - requestedAt > PENDING_EXTENSION_RELOAD_TTL_MS) {
       await storage.remove(PENDING_EXTENSION_RELOAD_KEY);
+      await disarmRecoveryWake(pending.recoveryAlarmName);
       if (pending.operationId) await maintenanceOperations.fail(pending.operationId, {
         code: 'MAINTENANCE_EXPIRED',
         message: 'Extension reload maintenance expired before recovery',
@@ -99,6 +138,7 @@ export function createExtensionReloadCoordinator({
       if (chrome.tabs?.reload) await reloadTab(tabId);
     }
     await storage.remove(PENDING_EXTENSION_RELOAD_KEY);
+    await disarmRecoveryWake(pending.recoveryAlarmName);
     const result = { recovered: true, tabCount: pending.tabIds.length, sourceTabId };
     if (pending.operationId) await maintenanceOperations.succeed(pending.operationId, result);
     console.info('[chatgpt-bridge] Extension reload recovery completed', {
@@ -131,11 +171,21 @@ export function createExtensionReloadCoordinator({
       const dispatchCommitted = ['dispatched', 'succeeded'].includes(String(command?.status || ''));
       const acceptancePending = runtime.outbox.some((entry) => String(entry.commandId || '') === commandId && entry.messageType === 'command.accepted');
       if (dispatchCommitted && !acceptancePending) {
+        const wake = await armRecoveryWake(operationId);
+        if (wake.armed) {
+          const storage = chrome.storage?.local;
+          const stored = await storage?.get?.(PENDING_EXTENSION_RELOAD_KEY);
+          const pending = stored?.[PENDING_EXTENSION_RELOAD_KEY] || null;
+          if (pending) await storage.set({
+            [PENDING_EXTENSION_RELOAD_KEY]: { ...pending, recoveryAlarmName: wake.alarmName, recoveryWakeAt: wake.when },
+          });
+        }
         console.info('[chatgpt-bridge] Restarting extension runtime after acknowledged command', {
           commandId: String(commandId || ''), operationId: String(operationId || ''), tabId,
+          recoveryAlarm: wake.alarmName || '', recoveryWakeArmed: wake.armed === true,
         });
         reloadRuntime();
-        return { reloading: true };
+        return { reloading: true, recoveryWake: wake };
       }
       if (commandFailed) {
         const error = new Error('Extension reload command was rejected before the accepted dispatch was acknowledged');
@@ -170,6 +220,10 @@ export function createExtensionReloadCoordinator({
     const tabs = reloadTabs && chrome.tabs?.query
       ? await chrome.tabs.query({ url: ['https://chatgpt.com/*', 'https://chat.openai.com/*'] }).catch(() => [])
       : [];
+    if (Number.isInteger(sourceTabId) && !tabs.some((tab) => tab?.id === sourceTabId)) {
+      const sourceTab = chrome.tabs?.get ? await chrome.tabs.get(sourceTabId).catch(() => null) : null;
+      tabs.push(sourceTab && Number.isInteger(sourceTab.id) ? sourceTab : { id: sourceTabId });
+    }
     const activeLeases = [];
     for (const tab of tabs) {
       if (!Number.isInteger(tab?.id)) continue;
