@@ -59,6 +59,79 @@ function resolveSubmissionAckTimeoutMs(request, kind = 'prompt') {
   return Math.max(general, steer);
 }
 
+function resolveSteerSubmitReadyTimeoutMs(request) {
+  return Math.max(2_000, Number(request?.options?.steerSubmitReadyTimeoutMs || CONFIG.steerSubmitReadyTimeoutMs) || CONFIG.steerSubmitReadyTimeoutMs || 30_000);
+}
+
+function composerTextValue(element) {
+  if (!element) return '';
+  return String(element.value ?? element.innerText ?? element.textContent ?? '');
+}
+
+function restoreComposerText(element, value = '') {
+  if (!element) return;
+  const text = String(value || '');
+  if (!text) {
+    clearComposerElement(element);
+    return;
+  }
+  setComposerTextByNativeValue(element, text);
+}
+
+async function waitForSteerSubmitButton(request, timeoutMs = resolveSteerSubmitReadyTimeoutMs(request)) {
+  const started = Date.now();
+  let lastDiagnosticAt = 0;
+  while (Date.now() - started < timeoutMs) {
+    const roots = [findComposerRootStrict()].filter(Boolean);
+    const button = findSendButton(roots);
+    if (button) {
+      const waitedMs = Date.now() - started;
+      diagnostic('steer.submit.ready', {
+        requestId: request?.requestId || '',
+        waitedMs,
+        label: button.getAttribute?.('aria-label') || button.getAttribute?.('title') || button.getAttribute?.('data-testid') || '',
+      });
+      return { button, waitedMs };
+    }
+
+    const stopVisible = Boolean(findStopButton(roots));
+    const responseFinalized = Boolean(!stopVisible && findRegenerateButton(finalizationControlRoots(request)));
+    if (responseFinalized) {
+      const error = new Error('STEER_WINDOW_CLOSED: ChatGPT completed the response before a steering send control became available');
+      error.code = 'STEER_WINDOW_CLOSED';
+      error.retryable = false;
+      error.provenNotExecuted = true;
+      error.cancellationEvidence = { source: 'composer', reason: 'response_finalized_before_steer_submit' };
+      throw error;
+    }
+
+    const now = Date.now();
+    if (!lastDiagnosticAt || now - lastDiagnosticAt >= 2_000) {
+      lastDiagnosticAt = now;
+      diagnostic('steer.submit.waiting', {
+        requestId: request?.requestId || '',
+        waitedMs: now - started,
+        timeoutMs,
+        stopButtonVisible: stopVisible,
+        sendButtonVisible: false,
+      });
+      emitRequestProgress(request, null, stopVisible, 'steer.submit.waiting', {
+        force: true,
+        meaningful: false,
+        sendButtonVisible: false,
+      });
+    }
+    await delay(120);
+  }
+
+  const error = new Error(`STEER_SUBMIT_NOT_READY: ChatGPT did not expose an enabled steering send control within ${timeoutMs}ms`);
+  error.code = 'STEER_SUBMIT_NOT_READY';
+  error.retryable = true;
+  error.provenNotExecuted = true;
+  error.cancellationEvidence = { source: 'composer', reason: 'steer_send_control_not_available' };
+  throw error;
+}
+
 async function enterPrompt(message, request, options = {}) {
   const kind = String(options.kind || 'prompt');
   const ackTimeoutMs = resolveSubmissionAckTimeoutMs(request, kind);
@@ -72,6 +145,7 @@ async function enterPrompt(message, request, options = {}) {
 
   await waitForChatPageReady(request, { stage: `${kind}.submit`, settleMs: 350 });
   const composer = await waitForComposer(request);
+  const composerBeforeText = composerTextValue(composer);
   if (!findChatMain()) {
     throw new Error('DOM_SCHEMA_CHANGED: Chat conversation root is missing. Refusing to submit without a scoped DOM observation root.');
   }
@@ -83,7 +157,25 @@ async function enterPrompt(message, request, options = {}) {
   }
 
   await delay(160);
-  const method = submitComposer(composer, request, { kind, attempt: 1 });
+  let method = '';
+  try {
+    if (kind === 'steer') {
+      const ready = await waitForSteerSubmitButton(request);
+      method = submitComposer(composer, request, { kind, attempt: 1, button: ready.button });
+    } else {
+      method = submitComposer(composer, request, { kind, attempt: 1 });
+    }
+  } catch (error) {
+    if (kind === 'steer' && error?.provenNotExecuted === true) {
+      try { restoreComposerText(composer, composerBeforeText); } catch {}
+      diagnostic('steer.submit.rolled_back', {
+        requestId: request?.requestId || '',
+        code: String(error?.code || ''),
+        restoredLength: composerBeforeText.length,
+      });
+    }
+    throw error;
+  }
   const evidence = await waitForPromptSubmissionEvidence(request, baselineTurnKeys, message, composer, ackTimeoutMs);
   diagnostic('prompt.submit.attempt', { requestId: request.requestId, kind, attempt: 1, method, ...evidence });
   emitChatEvent(request, evidence.confirmed ? 'prompt.submit.confirmed' : 'prompt.submit.uncertain', {
@@ -101,24 +193,21 @@ function submitComposer(composer, request, options = {}) {
   const kind = String(options.kind || 'prompt');
   const attempt = Number(options.attempt || 1);
   const composerRoot = findComposerRootStrict();
-  const button = findSendButton([composerRoot].filter(Boolean));
+  const button = options.button || findSendButton([composerRoot].filter(Boolean));
   if (button) {
     diagnostic('send_button.found', { requestId: request.requestId, kind, attempt, label: button.getAttribute('aria-label') || button.getAttribute('title') || button.getAttribute('data-testid') || '' });
     button.click();
     return 'button';
   }
 
-  // During active generation ChatGPT may replace the send button with the
-  // stop control while still accepting a composer Enter as a steering input.
-  // Native form.requestSubmit() bypasses the React keyboard path and has been
-  // observed to do nothing in that state, so steering prefers the scoped
-  // keyboard action. A missing acknowledgement remains uncertain and is never
-  // followed by a second submission method.
   if (kind === 'steer') {
-    diagnostic('send_button.not_found_keyboard_steer_fallback', { requestId: request.requestId, kind, attempt });
-    composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true }));
-    composer.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true }));
-    return 'keyboard_steer';
+    const error = new Error('STEER_SUBMIT_NOT_READY: ChatGPT steering send control is not available');
+    error.code = 'STEER_SUBMIT_NOT_READY';
+    error.retryable = true;
+    error.provenNotExecuted = true;
+    error.cancellationEvidence = { source: 'composer', reason: 'steer_send_control_missing' };
+    diagnostic('send_button.not_found_steer_blocked', { requestId: request.requestId, kind, attempt });
+    throw error;
   }
 
   const form = composer.closest?.('form') || (composerRoot?.tagName === 'FORM' ? composerRoot : composerRoot?.closest?.('form')) || null;
@@ -583,6 +672,8 @@ function isUsableButton(element) {
     return Object.freeze({
       enterPrompt,
       resolveSubmissionAckTimeoutMs,
+      resolveSteerSubmitReadyTimeoutMs,
+      waitForSteerSubmitButton,
       submitComposer,
       findComposer,
       buttonSignalText,

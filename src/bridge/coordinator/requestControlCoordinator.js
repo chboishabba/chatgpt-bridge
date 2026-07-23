@@ -69,7 +69,7 @@ export class RequestControlCoordinator {
       }, {
         ...options,
         sourceClientId,
-        timeoutMs: Number(options.timeoutMs) || 30_000,
+        timeoutMs: Number(options.submitTimeoutMs) || 75_000,
         request,
       }),
     });

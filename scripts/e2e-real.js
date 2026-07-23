@@ -454,12 +454,15 @@ async function waitForSteerWindow(options, turnId, timeoutMs = 90_000) {
     const types = new Set(eventTypes(events));
     const promptSubmitted = types.has('prompt.sent') || types.has('user_turn.captured') || types.has('generation.started');
     const accepted = types.has('prompt.accepted') || Boolean(active?.accepted);
-    const generationObserved = types.has('generation.started')
+    const generationActive = types.has('generation.started')
       || Boolean(active?.currentGenerationActive)
-      || Boolean(active?.sawGenerating)
-      || Number(active?.thinkingLength || 0) > 0
-      || Number(active?.answerLength || 0) > 0;
-    if (accepted && promptSubmitted && generationObserved && active && !active.done) return { terminal: false, ...last };
+      || Boolean(active?.sawGenerating);
+    const semanticProgress = Number(active?.thinkingLength || 0) > 0 || Number(active?.answerLength || 0) > 0
+      || Number(active?.progressTextLength || 0) > 0;
+    const explicitSteerControl = active?.lastProgressEvent?.sendButtonVisible === true || active?.lastProgressEvent?.steerControlVisible === true;
+    if (accepted && promptSubmitted && generationActive && (semanticProgress || explicitSteerControl) && active && !active.done) {
+      return { terminal: false, ...last };
+    }
     return null;
   }, { timeoutMs, intervalMs: 180, message: `active steer window for ${turnId}` }).catch((err) => {
     err.steerWindow = last;

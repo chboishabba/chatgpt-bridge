@@ -187,7 +187,7 @@ test('extension reload command stages the active runtime connection before resta
   assert.equal(sent[0].type, 'extension.reload.accepted');
   assert.equal(sent[0].temporaryConnection.staged, true);
   assert.equal(sent[0].pageReload.armed, true);
-  assert.equal(sent[0].pageReload.delayMs, 12_000);
+  assert.equal(sent[0].pageReload.delayMs, 2_500);
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{
     type: 'bridge.extension.reload',
     payload: {

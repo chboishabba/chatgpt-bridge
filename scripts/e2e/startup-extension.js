@@ -19,12 +19,10 @@ export async function maybeReloadE2eExtension(options, { api, testLog, preferred
   });
 }
 
-function sameBootstrappedTab(candidate, opened, reloadResult) {
-  const reconnectedId = String(reloadResult?.result?.reconnected?.id || '');
-  if (reconnectedId && candidate.id === reconnectedId) return true;
+function sameBootstrappedTab(candidate, opened) {
   const tabId = Number(opened.client?.browserTabId);
-  if (Number.isInteger(tabId) && Number(candidate.browserTabId) === tabId) return true;
-  return Boolean(opened.launchToken && candidate.launchToken === opened.launchToken);
+  if (Number.isInteger(tabId)) return Number(candidate.browserTabId) === tabId;
+  return Boolean(opened.client?.id && candidate.id === opened.client.id);
 }
 
 export async function prepareIsolatedE2eTab(options, { api, waitUntil, testLog, step, runId } = {}) {
@@ -56,7 +54,7 @@ export async function prepareIsolatedE2eTab(options, { api, waitUntil, testLog, 
   step(`Waiting for ChatGPT composer in the startup tab`);
   const readyClient = await waitUntil(async () => {
     const snapshot = await api(options, '/browser/clients');
-    const candidate = snapshot.clients?.find((item) => sameBootstrappedTab(item, opened, extensionStartupReload));
+    const candidate = snapshot.clients?.find((item) => sameBootstrappedTab(item, opened));
     if (!candidate?.ready || !candidate.pageReady || !candidate.composerReady || !candidate.chatMainReady) return null;
     return candidate;
   }, {
@@ -72,12 +70,20 @@ export async function prepareIsolatedE2eTab(options, { api, waitUntil, testLog, 
     `Real E2E requires content runtime ${EXTENSION_COMPATIBILITY.minContentVersion}+ from extension ${EXTENSION_COMPATIBILITY.minExtensionVersion}+; got ${readyClient.clientVersion || 'unknown'}. Reload the unpacked extension and reload ChatGPT tabs.`);
 
   if (extensionStartupReload?.status === 'reloaded') {
+    assert.equal(Number(readyClient.browserTabId), Number(opened.client.browserTabId),
+      'Extension reload replaced the startup browser tab instead of automatically refreshing the original page');
+    assert.equal(extensionStartupReload?.result?.recovery?.used === true, false,
+      `Extension reload required replacement recovery: ${extensionStartupReload?.result?.recovery?.reason || 'unknown'}`);
     assert(readyClient.backgroundEpoch, 'Extension reload reconnected without a background runtime epoch');
     assert(readyClient.contentEpoch, 'Extension reload reconnected without a content runtime epoch');
     assert.notEqual(readyClient.backgroundEpoch, opened.client.backgroundEpoch,
       'Extension reload did not replace the background service worker epoch');
     assert.notEqual(readyClient.contentEpoch, opened.client.contentEpoch,
       'Extension reload did not replace the page content runtime; automatic page refresh did not complete');
+    if (readyClient.mock?.enabled) {
+      assert(Number(readyClient.mock.trampolineReloadCount || 0) > 0,
+        'Mock extension reload did not pass through the independent Bridge reload trampoline');
+    }
     testLog('ok', 'extension-reload', 'Automatic page refresh replaced both extension runtime epochs', {
       backgroundEpoch: readyClient.backgroundEpoch,
       contentEpoch: readyClient.contentEpoch,

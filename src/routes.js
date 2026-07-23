@@ -18,6 +18,7 @@ import { initSse, streamEventBus, writeNamedSse } from './http/eventStreams.js';
 import { streamTurnEvents } from './http/publicTurnStream.js';
 import { streamObservedTurns } from './http/observedTurnStream.js';
 import { registerWorkflowRoutes } from './http/workflowRoutes.js';
+import { extensionReloadTrampolineHtml, normalizeExtensionReloadDelay, normalizeExtensionReloadTarget } from './http/extensionReloadTrampoline.js';
 import { BRIDGE_VERSION, EXTENSION_COMPATIBILITY } from './extensionCompatibility.js';
 
 
@@ -269,6 +270,18 @@ export function createRouter(bridge, fileStore, eventBus = null, turnManager = n
       if (!bridge.isLocalRequest(req)) throw new HttpError(403, 'Setup page is only available from localhost');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(setupHtml());
+    } catch (err) { next(err); }
+  });
+
+  router.get('/extension/reload-trampoline', (req, res, next) => {
+    try {
+      if (!bridgeForLocal(req)?.isLocalRequest(req)) throw new HttpError(403, 'Extension reload trampoline only accepts localhost requests');
+      const target = normalizeExtensionReloadTarget(req.query?.target);
+      if (!target) throw new HttpError(400, 'A valid ChatGPT target URL is required');
+      const delayMs = normalizeExtensionReloadDelay(req.query?.delayMs);
+      res.set('Cache-Control', 'no-store, max-age=0');
+      res.set('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      res.type('html').send(extensionReloadTrampolineHtml(target, delayMs));
     } catch (err) { next(err); }
   });
 
@@ -538,7 +551,9 @@ export function createRouter(bridge, fileStore, eventBus = null, turnManager = n
       if (!message) throw new HttpError(400, 'No steer message provided');
       const result = await bridge.steerRequest(req.params.requestId, message, {
         sourceClientId: String(req.body?.sourceClientId || ''),
-        timeoutMs: Number(req.body?.timeoutMs) || 30_000,
+        timeoutMs: Number(req.body?.timeoutMs) || 120_000,
+        steerReadyTimeoutMs: Number(req.body?.steerReadyTimeoutMs) || 90_000,
+        submitTimeoutMs: Number(req.body?.submitTimeoutMs) || 75_000,
       });
       res.json({ ok: true, requestId: req.params.requestId, steered: true, result });
     } catch (err) { next(err); }

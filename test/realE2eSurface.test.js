@@ -567,7 +567,8 @@ test('real E2E runner covers reasoning, steer, files, ZIP, project context, reus
   assert.match(source, /STEER_RESULT RED/);
   assert.match(source, /STEER_RESULT BLUE/);
   assert.match(source, /waitForSteerWindow/);
-  assert.match(source, /generationObserved/);
+  assert.match(source, /generationActive/);
+  assert.match(source, /semanticProgress/);
   assert.match(source, /currentGenerationActive/);
   assert.match(source, /only in this conversation/);
   assert.match(source, /Do not add it to ChatGPT account-wide memory/);

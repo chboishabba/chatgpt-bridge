@@ -116,7 +116,7 @@ export class BrowserTabCoordinator {
         return `${candidate.id || 'unknown'} url=${candidate.url || '(empty)'} reportedToken=${candidate.launchToken ? 'yes' : 'no'} urlToken=${urlToken ? 'yes' : 'no'} extension=${candidate.extensionVersion || '?'} content=${candidate.clientVersion || '?'}`;
       });
       const suffix = observed.length ? ` Observed clients: ${observed.join('; ')}` : ' No clients connected to this bridge instance.';
-      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.5 with content runtime 4.3.4 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
+      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.6 with content runtime 4.3.5 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
     });
     const launchedClient = normalizeLaunchedClient(client, launchToken);
     return {
@@ -242,7 +242,7 @@ export class BrowserTabCoordinator {
       sourceLaunchToken: BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || '')) ? before.launchToken : '',
       temporaryServerUrl: String(reloadServerUrl || ''),
       connection: { serverUrl: reloadServerUrl },
-      pageReloadDelayMs: 12_000,
+      pageReloadDelayMs: 2_500,
     }, {
       sourceClientId: before.id,
       timeoutMs: Math.min(timeoutMs, 8_000),
@@ -293,7 +293,13 @@ export class BrowserTabCoordinator {
       && BROWSER_LAUNCH_TOKEN_RE.test(String(before.launchToken || ''));
     const pageReloadArmed = accepted?.pageReload?.armed === true;
     const recoveryWakeArmed = accepted?.recoveryWake?.armed === true || accepted?.recoveryAlarm?.armed === true;
-    const graceMs = Math.max(1_000, Math.min(timeoutMs - 750, pageReloadArmed || recoveryWakeArmed ? 5_000 : 2_000));
+    const trampolinePlanned = accepted?.reloadTrampoline?.planned === true;
+    const armedPageDelayMs = Math.max(300, Number(accepted?.pageReload?.delayMs) || 2_500);
+    const desiredGraceMs = trampolinePlanned
+      ? Math.max(20_000, armedPageDelayMs + 12_000)
+      : pageReloadArmed ? armedPageDelayMs + 8_000
+        : recoveryWakeArmed ? 12_000 : 2_000;
+    const graceMs = Math.max(1_000, Math.min(timeoutMs - 750, desiredGraceMs));
     const originalReconnect = await Promise.race([
       reconnectPromise,
       new Promise((resolve) => setTimeout(() => resolve(null), graceMs)),
@@ -312,7 +318,7 @@ export class BrowserTabCoordinator {
     if (maintenanceBootstrapUrl) {
       try {
         await this.runtimeOptions.openExternalUrl(maintenanceBootstrapUrl, { allowExtensionMaintenance: true });
-        const maintenanceGraceMs = Math.max(750, Math.min(5_000, timeoutMs - (Date.now() - requestedAt) - 500));
+        const maintenanceGraceMs = Math.max(750, Math.min(10_000, timeoutMs - (Date.now() - requestedAt) - 500));
         const maintenanceReconnect = await Promise.race([
           reconnectPromise,
           new Promise((resolve) => setTimeout(() => resolve(null), maintenanceGraceMs)),

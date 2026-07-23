@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bootstrapExtensionContentRuntime } from './helpers/extensionContentRuntime.js';
+import { readBundledExtensionInfo } from '../src/extensionStartup.js';
 
 test('manifest-ordered content runtime initializes without temporal-dead-zone failures', async () => {
   const { scripts, sandbox } = await bootstrapExtensionContentRuntime();
   assert.equal(scripts.at(-1), 'content.js');
-  assert.equal(sandbox.__chatgptBrowserBridgeCompanionInstance?.version, '4.3.4');
+  assert.equal(sandbox.__chatgptBrowserBridgeCompanionInstance?.version, '4.3.5');
 });
 
 test('turn snapshot factory validates cross-module request and artifact dependencies at bootstrap', async () => {
@@ -51,6 +52,7 @@ test('artifact transfer validates navigation URL dependencies at bootstrap', asy
 });
 
 test('manifest bootstrap sends a protocol hello after lease-only request recovery', async () => {
+  const bundledExtension = await readBundledExtensionInfo();
   const { sandbox } = await bootstrapExtensionContentRuntime(undefined, {
     startRuntime: 'connect',
     bridgeToken: 'bootstrap-token',
@@ -74,9 +76,9 @@ test('manifest bootstrap sends a protocol hello after lease-only request recover
     .at(-1)?.payload;
   assert(hello, 'Reloaded content runtime did not emit a protocol hello');
   assert.equal(hello.recoveryError, undefined);
-  assert.equal(hello.extensionVersion, '2.3.5');
-  assert.equal(hello.extensionBundleId, '51eb649412d74e0da0449b9f78c4f5b2');
-  assert.equal(hello.clientVersion, '4.3.4');
+  assert.equal(hello.extensionVersion, bundledExtension.version);
+  assert.equal(hello.extensionBundleId, bundledExtension.bundleId);
+  assert.equal(hello.clientVersion, bundledExtension.contentVersion);
   assert.equal(hello.activeRequest?.requestId, 'request-reload');
   assert.equal(hello.activeRequest?.leaseId, 'lease-reload');
   assert.equal(hello.activeRequest?.ownerServerInstanceId, 'server-reload');

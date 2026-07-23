@@ -3,8 +3,10 @@ import { once } from 'node:events';
 import WebSocket from '../../src/runtime/ws.js';
 import { config } from '../../src/config.js';
 import { ExtensionMessageType, createExtensionEnvelope } from '../../src/bridge/protocol/v5.js';
+import { readBundledExtensionInfo } from '../../src/extensionStartup.js';
 
 export async function connectExtensionClient(hub, hello = {}) {
+  const bundledExtension = await readBundledExtensionInfo();
   const server = http.createServer((_req, res) => {
     res.statusCode = 404;
     res.end();
@@ -32,9 +34,9 @@ export async function connectExtensionClient(hub, hello = {}) {
     runtime: 'extension',
     url: hello.url || 'https://chatgpt.com/',
     title: hello.title || 'ChatGPT',
-    extensionVersion: hello.extensionVersion || '2.3.5',
-    extensionBundleId: hello.extensionBundleId || '51eb649412d74e0da0449b9f78c4f5b2',
-    clientVersion: hello.clientVersion || '4.3.4',
+    extensionVersion: hello.extensionVersion || bundledExtension.version,
+    extensionBundleId: hello.extensionBundleId || bundledExtension.bundleId,
+    clientVersion: hello.clientVersion || bundledExtension.contentVersion,
     extensionProtocolVersion: hello.extensionProtocolVersion ?? 5,
     ...hello,
   };

@@ -25,7 +25,7 @@ function composerDependencies(overrides = {}) {
   };
 }
 
-test('composer submission uses the React keyboard path when an active steer has no send button', async () => {
+test('composer steering refuses to synthesize Enter while ChatGPT exposes only the stop control', async () => {
   const { sandbox } = await bootstrapExtensionContentRuntime();
   let submitCount = 0;
   const events = [];
@@ -53,13 +53,71 @@ test('composer submission uses the React keyboard path when an active steer has 
     diagnostic(name, data) { diagnostics.push({ name, data }); },
   }));
 
-  const method = commands.submitComposer(composer, { requestId: 'steer-request' }, { kind: 'steer', attempt: 2 });
-  assert.equal(method, 'keyboard_steer');
+  assert.throws(() => commands.submitComposer(composer, { requestId: 'steer-request' }, { kind: 'steer', attempt: 2 }), (error) => {
+    assert.equal(error.code, 'STEER_SUBMIT_NOT_READY');
+    assert.equal(error.provenNotExecuted, true);
+    return true;
+  });
   assert.equal(submitCount, 0);
-  assert.equal(events.length, 2);
-  assert.deepEqual(diagnostics.map((entry) => entry.name), ['send_button.not_found_keyboard_steer_fallback']);
+  assert.equal(events.length, 0);
+  assert.deepEqual(diagnostics.map((entry) => entry.name), ['send_button.not_found_steer_blocked']);
   assert.equal(diagnostics[0].data.kind, 'steer');
   assert.equal(diagnostics[0].data.attempt, 2);
+});
+
+
+test('composer steering waits for a real enabled send control before clicking once', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  let delayCount = 0;
+  let clickCount = 0;
+  const sendButton = {
+    disabled: false,
+    isConnected: true,
+    getAttribute(name) { return name === 'data-testid' ? 'send-button' : null; },
+    click() { clickCount += 1; },
+  };
+  const stopButton = {
+    disabled: false,
+    isConnected: true,
+    getAttribute(name) {
+      if (name === 'data-testid') return 'stop-button';
+      if (name === 'aria-label') return 'Stop generating';
+      return null;
+    },
+  };
+  const form = {
+    tagName: 'FORM',
+    matches() { return false; },
+    closest() { return null; },
+    querySelectorAll(selector) {
+      if (selector.includes('send') || selector.includes('Send')) return delayCount >= 2 ? [sendButton] : [];
+      if (selector.includes('stop') || selector.includes('Stop')) return delayCount < 2 ? [stopButton] : [];
+      if (selector === 'button, [role="button"]') return delayCount >= 2 ? [sendButton] : [stopButton];
+      return [];
+    },
+  };
+  const composer = {
+    tagName: 'DIV', isConnected: true, isContentEditable: true, disabled: false, readOnly: false,
+    parentElement: form,
+    getAttribute(name) { if (name === 'contenteditable') return 'plaintext-only'; if (name === 'id') return 'prompt-textarea'; return null; },
+    closest(selector) { return selector === 'form' ? form : null; },
+    querySelectorAll() { return []; },
+  };
+  sandbox.document.querySelectorAll = (selector) => selector.includes('#prompt-textarea[contenteditable]') ? [composer] : [];
+  const diagnostics = [];
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    CONFIG: { steerSubmitReadyTimeoutMs: 5_000 },
+    async delay() { delayCount += 1; },
+    diagnostic(name, data) { diagnostics.push({ name, data }); },
+  }));
+
+  const ready = await commands.waitForSteerSubmitButton({ requestId: 'steer-wait', options: {} });
+  assert.equal(ready.button, sendButton);
+  const method = commands.submitComposer(composer, { requestId: 'steer-wait' }, { kind: 'steer', button: ready.button });
+  assert.equal(method, 'button');
+  assert.equal(clickCount, 1);
+  assert.equal(diagnostics.some((entry) => entry.name === 'steer.submit.waiting'), true);
+  assert.equal(diagnostics.some((entry) => entry.name === 'steer.submit.ready'), true);
 });
 
 
@@ -179,10 +237,10 @@ test('artifact source lookup forwards both the stored turn key and turn index', 
 test('steer acknowledgement uses a longer bounded proof window than an ordinary prompt', async () => {
   const { sandbox } = await bootstrapExtensionContentRuntime();
   const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
-    CONFIG: { promptSubmitAckTimeoutMs: 4_000, steerSubmitAckTimeoutMs: 10_000 },
+    CONFIG: { promptSubmitAckTimeoutMs: 4_000, steerSubmitAckTimeoutMs: 30_000, steerSubmitReadyTimeoutMs: 90_000 },
   }));
   assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: {} }, 'prompt'), 4_000);
-  assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: {} }, 'steer'), 10_000);
-  assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: { promptSubmitAckTimeoutMs: 12_000 } }, 'steer'), 12_000);
+  assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: {} }, 'steer'), 30_000);
+  assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: { promptSubmitAckTimeoutMs: 12_000 } }, 'steer'), 30_000);
   assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: { steerSubmitAckTimeoutMs: 8_000 } }, 'steer'), 8_000);
 });

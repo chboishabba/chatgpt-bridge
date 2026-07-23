@@ -311,6 +311,14 @@ handleClientActivity(clientId, client = null, payload = {}, envelope = null) {
       const responseMatches = Number(data.responseEpoch ?? 0) === Number(currentCanonical?.response?.epoch || 0);
       if (data.scopedToRequest && responseMatches && observation) {
         const output = observation.output || {};
+        const generation = observation.generation || {};
+        const composer = observation.composer || {};
+        this.lifecycle.updateProgress(state, {
+          stopButtonVisible: generation.stopVisible === true,
+          sendButtonVisible: composer.sendVisible === true || generation.sendVisible === true,
+          steerControlVisible: composer.steerVisible === true || generation.steerVisible === true,
+          meaningful: false,
+        }, { emit: false });
         const thinkingUpdate = this.results.thinkingSnapshot(state, output.thinking);
         if (thinkingUpdate) {
           state.callbacks.onThinkingUpdate?.(state.thinking, { type: 'tab.observation', observation });

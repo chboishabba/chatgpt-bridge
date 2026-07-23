@@ -4,6 +4,7 @@ import { BrowserExtensionHub } from '../src/browserExtensionHub.js';
 import { connectExtensionClient } from './helpers/extensionClient.js';
 import { ExtensionMessageType, createExtensionEnvelope } from '../src/bridge/protocol/v5.js';
 import { createPromptExecutionPlan } from '../src/bridge/requestExecutionPlan.js';
+import { readBundledExtensionInfo } from '../src/extensionStartup.js';
 
 async function waitFor(predicate, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;
@@ -16,6 +17,7 @@ async function waitFor(predicate, timeoutMs = 1_000) {
 }
 
 test('hub exposes server identity and preserves only immutable request routing ownership', async () => {
+  const bundledExtension = await readBundledExtensionInfo();
   const hub = new BrowserExtensionHub(null, { serverInstanceId: 'server-current' });
   const clientConnection = await connectExtensionClient(hub, {
     clientId: 'tab-a',
@@ -34,7 +36,7 @@ test('hub exposes server identity and preserves only immutable request routing o
     const client = hub.clients.find((item) => item.id === 'tab-a');
     assert.equal(hub.serverInstanceId, 'server-current');
     assert.equal(client.serverInstanceId, 'server-current');
-    assert.equal(client.extensionBundleId, '51eb649412d74e0da0449b9f78c4f5b2');
+    assert.equal(client.extensionBundleId, bundledExtension.bundleId);
     assert.equal(client.backgroundEpoch, 'test-background-epoch');
     assert.equal(client.contentEpoch, 'test-content-epoch');
     assert.equal(client.activeRequest.ownerServerInstanceId, 'server-other');

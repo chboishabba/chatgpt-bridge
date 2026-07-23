@@ -75,7 +75,7 @@ test('content runtime arms a page-owned reload before restarting the extension',
   const accepted = sent.find((payload) => payload.type === 'extension.reload.accepted');
   assert.ok(accepted);
   assert.equal(accepted.pageReload.armed, true);
-  assert.equal(accepted.pageReload.delayMs, 12_000);
+  assert.equal(accepted.pageReload.delayMs, 2_500);
   assert.equal(extensionRequests.length, 1);
   assert.equal(extensionRequests[0].type, 'bridge.extension.reload');
   assert.equal(extensionRequests[0].payload.commandId, 'reload-command');

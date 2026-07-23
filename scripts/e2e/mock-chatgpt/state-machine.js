@@ -205,6 +205,7 @@ export class MockChatGptStateMachine {
     this.sessions.set(this.sessionId, { id: this.sessionId, title: 'Local E2E conversation', turns: [] });
     this.activeRequest = null;
     this.generating = false;
+    this.steerReady = false;
     this.generationSequence = 0;
     this.activeGenerationSequence = 0;
     this.phase = 'idle';
@@ -262,6 +263,7 @@ export class MockChatGptStateMachine {
       })),
       attachments: this.attachments.map((item) => ({ ...item })),
       generating: this.generating,
+      steerReady: this.steerReady,
     };
   }
 
@@ -360,6 +362,7 @@ export class MockChatGptStateMachine {
     const generationSequence = ++this.generationSequence;
     this.activeGenerationSequence = generationSequence;
     this.generating = true;
+    this.steerReady = false;
     this.phase = plan.reasoning ? 'reasoning' : 'generating';
     const assistantKey = `assistant-${randomUUID()}`;
     const turn = { role: 'assistant', key: assistantKey, messageId: assistantKey, text: '', final: false, progressItems: [], artifacts: [] };
@@ -374,12 +377,14 @@ export class MockChatGptStateMachine {
         if (!isCurrentGeneration()) return turn;
         turn.progressItems = [{ logicalId: 'reasoning-main', id: 'reasoning-main', kind: 'thinking', text: `${percentage}%`, state: percentage === 100 ? 'completed' : 'active', active: percentage !== 100, visible: true, revision: percentage / 10 + 1 }];
         turn.text = '';
+        this.steerReady = true;
         this.revision += 1;
         await onChange(`reasoning-${percentage}`);
         await delay(90);
       }
     } else if (plan.generationDelayMs) {
       turn.text = 'Working…';
+      this.steerReady = true;
       this.revision += 1;
       await onChange('generation-progress');
       await delay(plan.generationDelayMs);
@@ -397,13 +402,24 @@ export class MockChatGptStateMachine {
     if (!isCurrentGeneration()) return turn;
     this.activeGenerationSequence = 0;
     this.generating = false;
+    this.steerReady = false;
     this.phase = 'idle';
     this.revision += 1;
     await onChange('generation-completed');
     return turn;
   }
 
+  canSteer() {
+    return Boolean(this.generating && this.steerReady
+      && [...this.turns].reverse().some((turn) => turn.role === 'assistant' && !turn.final));
+  }
+
   async steer(message, { onChange = () => {} } = {}) {
+    if (!this.canSteer()) {
+      const error = new Error('Mock ChatGPT steer control is unavailable before assistant progress');
+      error.code = 'MOCK_STEER_NOT_READY';
+      throw error;
+    }
     const previous = [...this.turns].reverse().find((turn) => turn.role === 'assistant' && !turn.final);
     if (!previous) throw new Error('No active mock assistant turn to steer');
     previous.text = previous.text && previous.text !== 'Working…' ? previous.text : '';
@@ -443,6 +459,7 @@ export class MockChatGptStateMachine {
     this.activeGenerationSequence = 0;
     this.generationSequence += 1;
     this.generating = false;
+    this.steerReady = false;
     this.phase = 'idle';
     this.revision += 1;
     await onChange('generation-steered');
@@ -453,6 +470,7 @@ export class MockChatGptStateMachine {
     this.activeGenerationSequence = 0;
     this.generationSequence += 1;
     this.generating = false;
+    this.steerReady = false;
     this.phase = 'idle';
     const active = [...this.turns].reverse().find((turn) => turn.role === 'assistant' && !turn.final);
     if (active) { active.text = active.text || 'Cancelled'; active.final = true; }

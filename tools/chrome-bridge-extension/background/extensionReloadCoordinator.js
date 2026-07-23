@@ -71,6 +71,20 @@ export function createExtensionReloadCoordinator({
     }
   }
 
+  function reloadTrampolineUrl(rawUrl = '', serverUrl = '', launchToken = '', delayMs = 2_500) {
+    const safeServer = safeBridgeServerUrl(serverUrl);
+    const targetUrl = temporaryReloadUrl(rawUrl, safeServer, launchToken);
+    if (!safeServer || !targetUrl) return { targetUrl: '', trampolineUrl: '' };
+    try {
+      const trampoline = new URL('/extension/reload-trampoline', safeServer);
+      trampoline.searchParams.set('target', targetUrl);
+      trampoline.searchParams.set('delayMs', String(Math.max(500, Math.min(Number(delayMs) || 2_500, 15_000))));
+      return { targetUrl, trampolineUrl: trampoline.toString() };
+    } catch {
+      return { targetUrl: '', trampolineUrl: '' };
+    }
+  }
+
   async function reloadTabWithTemporaryConnection(tabId, serverUrl, launchToken = '') {
     if (!Number.isInteger(tabId) || !serverUrl || !chrome.tabs?.get || !chrome.tabs?.update) return false;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
@@ -133,6 +147,10 @@ export function createExtensionReloadCoordinator({
     const serverUrl = safeBridgeServerUrl(pending.temporaryServerUrl);
     await restorePendingLaunchRecords(pending);
     for (const tabId of pending.tabIds) {
+      const targetUrl = String(pending.targetUrls?.[String(tabId)] || '');
+      if (targetUrl) {
+        try { await navigateTab(tabId, targetUrl); continue; } catch {}
+      }
       const launchRecord = pendingLaunchRecord(pending, tabId);
       if (tabId === sourceTabId && await reloadTabWithTemporaryConnection(tabId, serverUrl, launchRecord?.launchToken || '')) continue;
       if (chrome.tabs?.reload) await reloadTab(tabId);
@@ -162,7 +180,7 @@ export function createExtensionReloadCoordinator({
     } catch {}
   }
 
-  async function reloadAfterAcceptanceAck({ tabId, commandId, operationId }) {
+  async function reloadAfterAcceptanceAck({ tabId, commandId, operationId, pending }) {
     const deadline = Date.now() + Math.max(1_000, Number(ackTimeoutMs) || 7_000);
     while (Date.now() < deadline) {
       const runtime = await backgroundState.read(tabId);
@@ -180,12 +198,26 @@ export function createExtensionReloadCoordinator({
             [PENDING_EXTENSION_RELOAD_KEY]: { ...pending, recoveryAlarmName: wake.alarmName, recoveryWakeAt: wake.when },
           });
         }
+        let trampolineCount = 0;
+        for (const [rawTabId, trampolineUrl] of Object.entries(pending?.trampolineUrls || {})) {
+          const targetTabId = Number(rawTabId);
+          if (!Number.isInteger(targetTabId) || !trampolineUrl) continue;
+          try {
+            await navigateTab(targetTabId, trampolineUrl);
+            trampolineCount += 1;
+          } catch (error) {
+            console.warn('[chatgpt-bridge] Extension reload trampoline navigation failed', {
+              operationId: String(operationId || ''), tabId: targetTabId, message: error?.message || String(error),
+            });
+          }
+        }
+        if (trampolineCount) await new Promise((resolve) => setTimeout(resolve, 120));
         console.info('[chatgpt-bridge] Restarting extension runtime after acknowledged command', {
           commandId: String(commandId || ''), operationId: String(operationId || ''), tabId,
-          recoveryAlarm: wake.alarmName || '', recoveryWakeArmed: wake.armed === true,
+          recoveryAlarm: wake.alarmName || '', recoveryWakeArmed: wake.armed === true, trampolineCount,
         });
         reloadRuntime();
-        return { reloading: true, recoveryWake: wake };
+        return { reloading: true, recoveryWake: wake, trampolineCount };
       }
       if (commandFailed) {
         const error = new Error('Extension reload command was rejected before the accepted dispatch was acknowledged');
@@ -242,10 +274,17 @@ export function createExtensionReloadCoordinator({
     if (!planned.accepted) throw new Error(`Extension maintenance plan rejected: ${planned.reason}`);
     const operationId = planned.state.active.operationId;
     const launchRecords = {};
+    const targetUrls = {};
+    const trampolineUrls = {};
     for (const tab of tabs) {
       if (!Number.isInteger(tab?.id)) continue;
       const record = await readLaunchedTab(tab.id);
       if (record?.launchToken && !String(record.launchToken).startsWith('bridge-reload-')) launchRecords[String(tab.id)] = record;
+      const currentTab = tab?.url ? tab : (chrome.tabs?.get ? await chrome.tabs.get(tab.id).catch(() => null) : null);
+      const stableToken = String(record?.launchToken || (tab.id === sourceTabId ? sourceLaunchToken : ''));
+      const trampoline = reloadTrampolineUrl(currentTab?.url || '', temporaryServerUrl, stableToken);
+      if (trampoline.targetUrl) targetUrls[String(tab.id)] = trampoline.targetUrl;
+      if (trampoline.trampolineUrl) trampolineUrls[String(tab.id)] = trampoline.trampolineUrl;
     }
     const pending = {
       tabIds: tabs.map((tab) => tab.id).filter(Number.isInteger),
@@ -253,6 +292,8 @@ export function createExtensionReloadCoordinator({
       sourceTabId: Number.isInteger(sourceTabId) ? sourceTabId : null,
       temporaryServerUrl: safeBridgeServerUrl(temporaryServerUrl),
       launchRecords,
+      targetUrls,
+      trampolineUrls,
       requestedAt: Date.now(),
       operationId,
       commandId: terminalCommandId,
@@ -285,7 +326,7 @@ export function createExtensionReloadCoordinator({
       operationId, commandId: terminalCommandId, expectedVersion: String(expectedVersion || ''),
       reloadTabs: Boolean(reloadTabs), tabCount: tabs.length, sourceTabId,
     });
-    void reloadAfterAcceptanceAck({ tabId: sourceTabId, commandId: terminalCommandId, operationId })
+    void reloadAfterAcceptanceAck({ tabId: sourceTabId, commandId: terminalCommandId, operationId, pending })
       .catch((error) => console.error('[chatgpt-bridge] extension reload acceptance barrier failed', error));
     return {
       operationId,
@@ -293,6 +334,7 @@ export function createExtensionReloadCoordinator({
       reloadTabs,
       tabCount: tabs.length,
       preservedLaunchCount: Object.keys(launchRecords).length,
+      trampolinePlannedCount: Object.keys(trampolineUrls).length,
       expectedVersion,
     };
   }

@@ -189,8 +189,27 @@
       } else if (effectType === 'prompt.submit' || effectType === 'prompt.steer') {
         const expectedText = String(expected.message || preconditions.message || request.pendingSubmittedTurnExpectedText || '');
         const currentComposerText = composerText();
-        Object.assign(evidence, { expectedTextLength: expectedText.length, composerTextLength: currentComposerText.length });
-        if (request.submittedUserTurnKey) {
+        const targetResponseEpoch = Math.max(0, Number(preconditions.targetResponseEpoch || expected.targetResponseEpoch) || 0);
+        const pendingBaseline = request.pendingSubmittedTurnBaseline instanceof Set
+          ? request.pendingSubmittedTurnBaseline
+          : new Set(request.pendingSubmittedTurnBaseline || []);
+        const submittedTurnIsNew = Boolean(request.submittedUserTurnKey && !pendingBaseline.has(request.submittedUserTurnKey));
+        Object.assign(evidence, {
+          expectedTextLength: expectedText.length,
+          composerTextLength: currentComposerText.length,
+          targetResponseEpoch,
+          pendingBaselineCount: pendingBaseline.size,
+          submittedTurnIsNew,
+        });
+        if (effectType === 'prompt.steer') {
+          if (targetResponseEpoch > 0 && Number(request.responseEpoch || 0) >= targetResponseEpoch) {
+            outcome = 'succeeded'; reason = 'steer_response_epoch_committed';
+          } else if (pendingBaseline.size && submittedTurnIsNew) {
+            outcome = 'succeeded'; reason = 'new_steer_user_turn_observed';
+          } else if (expectedText && currentComposerText === expectedText) {
+            outcome = 'not_started'; reason = 'expected_steer_still_in_composer';
+          } else reason = 'steer_submission_not_provable';
+        } else if (request.submittedUserTurnKey) {
           outcome = 'succeeded'; reason = 'submitted_user_turn_observed';
         } else if (expectedText && currentComposerText === expectedText) {
           outcome = 'not_started'; reason = 'expected_prompt_still_in_composer';

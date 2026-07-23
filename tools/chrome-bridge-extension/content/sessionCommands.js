@@ -190,7 +190,7 @@ async function handleExtensionReload(payload) {
     })
     : { staged: false, reason: reloadTabs ? 'staging_unavailable' : 'tabs_not_reloaded' };
   const pageReload = reloadTabs
-    ? await armPageOwnedReload(Number(payload.pageReloadDelayMs) || 12_000)
+    ? await armPageOwnedReload(Number(payload.pageReloadDelayMs) || 2_500)
     : { armed: false, reason: 'tabs_not_reloaded' };
   let scheduled;
   try {
@@ -217,6 +217,10 @@ async function handleExtensionReload(payload) {
     temporaryConnection,
     pageReload,
     maintenanceOperationId: String(scheduled.operationId || ''),
+    reloadTrampoline: {
+      planned: Number(scheduled.trampolinePlannedCount || 0) > 0,
+      count: Number(scheduled.trampolinePlannedCount || 0),
+    },
     url: location.href,
   });
   diagnostic('extension.reload.accepted', {
@@ -224,6 +228,10 @@ async function handleExtensionReload(payload) {
     reloadTabs,
     temporaryConnection: { ...temporaryConnection, tokenChanged: Boolean(temporaryConnection.tokenChanged) },
     pageReload,
+    reloadTrampoline: {
+      planned: Number(scheduled.trampolinePlannedCount || 0) > 0,
+      count: Number(scheduled.trampolinePlannedCount || 0),
+    },
     maintenanceOperationId: String(scheduled.operationId || ''),
   });
 }

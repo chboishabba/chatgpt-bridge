@@ -378,7 +378,7 @@ test('extension reload waits for the server ACK of its durable command acceptanc
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.5',
+    expectedVersion: '2.3.6',
   });
 
   await new Promise((resolve) => setTimeout(resolve, 80));
@@ -410,4 +410,79 @@ test('extension reload waits for the server ACK of its durable command acceptanc
   runtime = await h.backgroundState.read(h.state.tabId);
   assert.equal(runtime.outbox.some((entry) => entry.messageId === accepted.messageId), false);
   assert.equal(runtime.commands['reload-ack-command'].status, 'dispatched');
+});
+
+test('extension reload stages a localhost trampoline before restarting the runtime', async (t) => {
+  const h = backgroundHarness(97);
+  const previousChrome = globalThis.chrome;
+  t.after(() => {
+    h.restore();
+    if (previousChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = previousChrome;
+  });
+  const localStorage = memoryStorage();
+  globalThis.chrome = {
+    storage: { local: localStorage },
+    tabs: {
+      async query() { return [{ id: 97, url: 'https://chatgpt.com/c/trampoline-fixture' }]; },
+      async get(tabId) { return { id: tabId, url: 'https://chatgpt.com/c/trampoline-fixture' }; },
+    },
+  };
+  await initializeHarness(h);
+  await handleServerEnvelope({
+    ...h,
+    envelope: serverEnvelope({ sequence: 1, commandId: 'reload-trampoline-command', type: 'extension.reload', payload: { reloadTabs: true } }),
+  });
+  const accepted = (await h.backgroundState.read(h.state.tabId)).outbox.find((entry) => entry.messageType === ExtensionMessageType.COMMAND_ACCEPTED
+    && entry.commandId === 'reload-trampoline-command');
+  assert.ok(accepted);
+
+  const order = [];
+  const navigations = [];
+  const coordinator = createExtensionReloadCoordinator({
+    backgroundState: h.backgroundState,
+    maintenanceOperations: createMaintenanceOperationStore(localStorage),
+    safeBridgeServerUrl: (value) => String(value || ''),
+    async readLaunchedTab() {
+      return { launchToken: 'bridge-real-e2e-trampoline', requestedUrl: 'https://chatgpt.com/c/trampoline-fixture', serverUrl: 'http://127.0.0.1:18181' };
+    },
+    async rememberLaunchedTab() {},
+    async navigateTab(tabId, url) { order.push('navigate'); navigations.push({ tabId, url }); },
+    async reloadTab() {},
+    launchTokenPattern: /^bridge-[a-z0-9_-]+$/i,
+    reloadRuntime() { order.push('reload'); },
+    async scheduleRecoveryWake(alarmName) { return { armed: true, alarmName, when: Date.now() + 750 }; },
+    ackTimeoutMs: 1_000,
+  });
+  await coordinator.scheduleExtensionReload({
+    reloadTabs: true,
+    sourceTabId: 97,
+    sourceLaunchToken: 'bridge-real-e2e-trampoline',
+    temporaryServerUrl: 'http://127.0.0.1:18181',
+    commandId: 'reload-trampoline-command',
+    expectedVersion: '2.3.6',
+  });
+  await handleServerEnvelope({
+    ...h,
+    envelope: createExtensionEnvelope(ExtensionMessageType.TRANSPORT_ACK, {
+      ackMessageId: accepted.messageId,
+      acceptedSequence: accepted.source.sequence,
+      accepted: true,
+      reason: '',
+    }, {
+      messageId: 'reload-trampoline-ack',
+      source: { clientId: 'server', tabId: 97, backgroundEpoch: 'server', contentEpoch: '', sequence: 2 },
+      causationId: accepted.messageId,
+    }),
+  });
+  await waitFor(() => order.includes('reload'));
+  assert.deepEqual(order.slice(0, 2), ['navigate', 'reload']);
+  assert.equal(navigations[0].tabId, 97);
+  const trampoline = new URL(navigations[0].url);
+  assert.equal(trampoline.origin, 'http://127.0.0.1:18181');
+  assert.equal(trampoline.pathname, '/extension/reload-trampoline');
+  const target = new URL(trampoline.searchParams.get('target'));
+  assert.equal(target.origin, 'https://chatgpt.com');
+  assert.equal(target.pathname, '/c/trampoline-fixture');
+  assert.equal(new URLSearchParams(target.hash.slice(1)).get('chatgpt-bridge-launch'), 'bridge-real-e2e-trampoline');
 });

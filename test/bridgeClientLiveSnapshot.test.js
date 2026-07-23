@@ -30,3 +30,49 @@ test('bridge routes passive TabObservation snapshots to the transient workflow e
   assert.equal(seen[0].data.reasoning, 'Inspecting');
   assert.equal(eventBus.recentEvents(10).length, 0);
 });
+
+test('request-scoped observations project the real steer controls into canonical request progress', () => {
+  const state = {
+    requestId: 'request-1', clientId: 'client-1', callbacks: {},
+    thinking: '', answer: '', progressText: '', progressItems: [], progressItemsSignature: '[]',
+    reasoningHistory: [], responseBlocks: [], codeBlocks: [], codeBlockDiagnostics: [], artifacts: [],
+    progress: { phase: 'generating' },
+  };
+  const progressUpdates = [];
+  const lifecycle = {
+    getState: () => ({
+      submission: 'submitted', response: { epoch: 0, userTurnKey: 'user-1' },
+      source: { conversationId: 'session-1' }, artifact: { required: false },
+    }),
+    updateProgress(target, payload, options) {
+      target.progress = { ...target.progress, ...payload };
+      progressUpdates.push({ payload, options });
+    },
+    emitRequestEvent() {},
+    canonicalArtifactStatus: () => 'not_expected',
+    ingestRequestTransition: () => ({ accepted: true }),
+  };
+  const router = new BridgeClientEventRouter({
+    pending: new Map([[state.requestId, state]]), commands: new Map(), artifacts: new Map(), lifecycle,
+    publishObservedTurn() {}, registerObservedArtifacts: (items) => items, handleCommandResponse() {},
+  });
+
+  router.handleClientActivity('client-1', { session: { id: 'session-1' } }, {
+    type: 'tab.observation',
+    observation: {
+      conversationId: 'session-1', revision: 1, observedAt: Date.now(),
+      activeRequest: { requestId: 'request-1', submittedUserTurnKey: 'user-1' },
+      turn: { key: 'assistant-1', userKey: 'user-1', index: 1 },
+      composer: { sendVisible: true },
+      generation: { state: 'active', stopVisible: false, sendVisible: true },
+      blocker: { state: 'none' },
+      output: { state: 'streaming', answer: '', thinking: '', progress: '', progressItems: [] },
+      artifact: { state: 'not_expected', count: 0 }, artifacts: [],
+    },
+  });
+
+  assert.equal(state.progress.sendButtonVisible, true);
+  assert.equal(state.progress.stopButtonVisible, false);
+  assert.equal(progressUpdates.at(-1)?.options?.emit, false);
+  assert.equal(progressUpdates.at(-1)?.payload?.meaningful, false);
+});

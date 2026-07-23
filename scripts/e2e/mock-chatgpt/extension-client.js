@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import WebSocket from '../../../src/runtime/ws.js';
 import { ExtensionMessageType, createExtensionEnvelope, validateExtensionEnvelope } from '../../../src/bridge/protocol/v5.js';
 import { renderMockChatPage } from './render.js';
@@ -9,6 +11,20 @@ import { effectEnvelopeOptions, effortsListResult, intelligenceApplyResult, mode
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const text = (value) => String(value ?? '').trim();
+
+function bundledExtensionRuntimeIdentity() {
+  const root = fileURLToPath(new URL('../../../tools/chrome-bridge-extension/', import.meta.url));
+  const manifest = JSON.parse(fs.readFileSync(new URL('manifest.json', new URL(`file://${root}/`)), 'utf8'));
+  const content = fs.readFileSync(new URL('content.js', new URL(`file://${root}/`)), 'utf8');
+  const build = fs.readFileSync(new URL('shared/buildIdentity.js', new URL(`file://${root}/`)), 'utf8');
+  return Object.freeze({
+    extensionVersion: text(manifest.version),
+    clientVersion: text(content.match(/\bCONTENT_SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1]),
+    extensionBundleId: text(build.match(/\bbundleId\s*:\s*['"]([^'"]+)['"]/)?.[1]),
+  });
+}
+
+export const MOCK_EXTENSION_RUNTIME_IDENTITY = bundledExtensionRuntimeIdentity();
 
 function requestIdentity(envelope, body = {}) {
   const source = envelope?.request || {};
@@ -63,6 +79,7 @@ export class MockExtensionTab extends EventEmitter {
     this.pendingTransportAcks = new Map();
     this.extensionReloadCount = 0;
     this.pageReloadCount = 0;
+    this.trampolineReloadCount = 0;
   }
 
   publicLayoutUrl() {
@@ -90,9 +107,9 @@ export class MockExtensionTab extends EventEmitter {
       browserTabId: this.tabId,
       launchToken: this.launchToken,
       requestedUrl: this.requestedUrl,
-      clientVersion: '4.3.4',
-      extensionVersion: '2.3.5',
-      extensionBundleId: '51eb649412d74e0da0449b9f78c4f5b2',
+      clientVersion: MOCK_EXTENSION_RUNTIME_IDENTITY.clientVersion,
+      extensionVersion: MOCK_EXTENSION_RUNTIME_IDENTITY.extensionVersion,
+      extensionBundleId: MOCK_EXTENSION_RUNTIME_IDENTITY.extensionBundleId,
       extensionProtocolVersion: 5,
       visibilityState: 'visible',
       focused: true,
@@ -117,6 +134,7 @@ export class MockExtensionTab extends EventEmitter {
         layoutUrl: this.publicLayoutUrl(),
         extensionReloadCount: this.extensionReloadCount,
         pageReloadCount: this.pageReloadCount,
+        trampolineReloadCount: this.trampolineReloadCount,
       },
     };
   }
@@ -350,14 +368,16 @@ export class MockExtensionTab extends EventEmitter {
         await this.#result(envelope, 'extension.reload.accepted', {
           accepted: true,
           scheduled: true,
-          expectedVersion: body.expectedVersion || '2.3.5',
-          pageReload: { armed: true, owner: 'mock-recovery-alarm' },
+          expectedVersion: body.expectedVersion || '2.3.6',
+          pageReload: { armed: true, owner: 'mock-main-world-timer', delayMs: Number(body.pageReloadDelayMs) || 2_500 },
           recoveryWake: { armed: true, owner: 'mock-extension-alarm' },
+          reloadTrampoline: { planned: true, count: 1, owner: 'mock-local-bridge-page' },
         });
         // Match the real lifecycle: the acknowledged background worker goes
         // away first, then an independent recovery wake reloads the document
         // so both the background and content epochs are replaced.
         setTimeout(() => {
+          this.trampolineReloadCount += 1;
           this.pageReloadCount += 1;
           void this.reconnect({ replaceBackground: true, replaceContent: true });
         }, 850);
@@ -456,6 +476,11 @@ export class MockExtensionTab extends EventEmitter {
     const request = requestIdentity(envelope, body);
     const step = body.effect;
     if (!request || !step?.effectId) throw Object.assign(new Error('Mock prompt.steer requires effect identity'), { code: 'MOCK_STEER_INVALID' });
+    if (!this.state.canSteer()) {
+      const error = new Error('Mock ChatGPT has not exposed the steering send control yet');
+      error.code = 'MOCK_STEER_NOT_READY';
+      throw error;
+    }
     const preview = steerEffectResult({ request, body, step });
     const userKey = this.state.appendUser(body.message, { ...request, responseEpoch: preview.targetResponseEpoch });
     const result = steerEffectResult({ request, body, step, submittedUserTurnKey: userKey });
@@ -630,7 +655,7 @@ export class MockExtensionTab extends EventEmitter {
       visibility: 'visible',
       focused: true,
       document: { state: 'ready', readyState: 'complete', pageReady: true, chatMainReady: true },
-      composer: { state: 'ready', ready: true, attachments: this.state.attachments.map((item) => ({ ...item })) },
+      composer: { state: 'ready', ready: true, sendVisible: this.state.generating && this.state.steerReady, attachments: this.state.attachments.map((item) => ({ ...item })) },
       activeRequest: active,
       boundLeaseProjection: active,
       turn: snapshot.assistant ? {
@@ -645,7 +670,7 @@ export class MockExtensionTab extends EventEmitter {
         userPrompt: snapshot.user?.text || '',
         promptBoundary: snapshot.user ? { submittedUserTurnKey: snapshot.user.key, submittedUserTurnIndex: userIndex } : null,
       } : { state: 'none', phase: this.state.phase, key: '', index: -1, userKey: snapshot.user?.key || '', userIndex, userPrompt: snapshot.user?.text || '' },
-      generation: { state: this.state.generating ? 'active' : 'stopped', stopVisible: this.state.generating, streamingVisible: this.state.generating, activeTool: false },
+      generation: { state: this.state.generating ? 'active' : 'stopped', stopVisible: this.state.generating && !this.state.steerReady, sendVisible: this.state.generating && this.state.steerReady, streamingVisible: this.state.generating, activeTool: false },
       blocker: { state: 'none' },
       output: {
         state: outputState,

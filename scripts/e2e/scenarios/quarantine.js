@@ -7,8 +7,6 @@ export async function runQuarantineIsolationScenario(context = {}) {
     sessionUrl,
     testClient,
     runId,
-    effortFor,
-    FAST_EFFORT,
     assert,
     api,
     waitUntil,
@@ -19,7 +17,7 @@ export async function runQuarantineIsolationScenario(context = {}) {
   await scenario('quarantine-isolation', async () => {
     const scope = 'quarantine-isolation';
     const launchToken = `bridge-real-e2e-safe-${runId}`;
-    const expected = `QUARANTINE_SAFE_TAB_${marker}`;
+    const expected = `QSAFE_${String(runId || marker).replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase()}`;
     let safeClient = null;
     let quarantineApplied = false;
     try {
@@ -66,8 +64,7 @@ export async function runQuarantineIsolationScenario(context = {}) {
         'Safe E2E tab was unexpectedly quarantined');
 
       const response = await sendSynchronousMessage(options, `/sessions/${encodeURIComponent(sessionId)}/messages`, {
-        message: `This verifies quarantine isolation. Output exactly ${expected}.`,
-        effort: effortFor('quarantine-isolation', FAST_EFFORT, 'safe-tab scheduling requires only an exact answer'),
+        message: `Reply exactly ${expected}.`,
       }, { scope, label: 'safe-tab request after quarantine' });
       assert(normalizeAnswer(response.answer || response.response) === expected,
         `Unexpected quarantine isolation answer: ${response.answer || response.response}`);

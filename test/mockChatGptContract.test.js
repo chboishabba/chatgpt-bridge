@@ -17,3 +17,16 @@ test('remaining live-only boundaries are platform/product concerns, not canonica
   assert.ok(LOCAL_E2E_LIVE_ONLY_BOUNDARIES.length >= 3);
   assert.ok(LOCAL_E2E_LIVE_ONLY_BOUNDARIES.every((item) => typeof item === 'string' && item.length > 20));
 });
+
+test('mock extension hello identity is read from the bundled extension files', async () => {
+  const [{ MOCK_EXTENSION_RUNTIME_IDENTITY }, { readBundledExtensionInfo }] = await Promise.all([
+    import('../scripts/e2e/mock-chatgpt/extension-client.js'),
+    import('../src/extensionStartup.js'),
+  ]);
+  const bundled = await readBundledExtensionInfo();
+  assert.deepEqual(MOCK_EXTENSION_RUNTIME_IDENTITY, {
+    extensionVersion: bundled.version,
+    clientVersion: bundled.contentVersion,
+    extensionBundleId: bundled.bundleId,
+  });
+});

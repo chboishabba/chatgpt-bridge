@@ -218,6 +218,8 @@ export function compactRequestState(state, canonicalState = null) {
     sawAnswer: state.progress?.sawAnswer ?? false,
     networkDone: state.progress?.networkDone ?? false,
     stopButtonVisible: state.progress?.stopButtonVisible ?? false,
+    sendButtonVisible: state.progress?.sendButtonVisible ?? false,
+    steerControlVisible: state.progress?.steerControlVisible ?? false,
   };
 }
 

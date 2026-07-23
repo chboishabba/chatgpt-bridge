@@ -22,7 +22,7 @@ function memoryArea(initial = {}) {
 function maintenanceHref(extra = {}) {
   const url = new URL('chrome-extension://dchijcgcljbehhihflegffnhkambmmjb/maintenance-reload.html');
   url.searchParams.set('confirm', 'chatgpt-bridge-maintenance-reload-v1');
-  url.searchParams.set('expectedVersion', '2.3.5');
+  url.searchParams.set('expectedVersion', '2.3.6');
   url.searchParams.set('reloadTabs', '1');
   url.searchParams.set('serverUrl', 'http://127.0.0.1:18181');
   url.searchParams.set('commandId', 'maintenance-bootstrap-fixture');
@@ -52,7 +52,7 @@ test('maintenance reload page persists handoff and reloads without the old comma
   const pending = await runMaintenanceReload({ chromeApi, href: maintenanceHref(), delayMs: 0 });
   assert.equal(reloads, 1);
   assert.equal(pending.bootstrapPage, true);
-  assert.equal(pending.expectedVersion, '2.3.5');
+  assert.equal(pending.expectedVersion, '2.3.6');
   assert.deepEqual(pending.tabIds, [42]);
   assert.equal(pending.launchRecords['42'].launchToken, 'bridge-real-e2e-fixture-token');
   assert.deepEqual(local.values.bridgePendingExtensionReload, pending);
