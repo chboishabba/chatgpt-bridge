@@ -6,7 +6,7 @@ The workflow v3 and Protocol 5 hard cut is implemented in the current tree. Prot
 
 Current versions:
 
-- bridge package: `6.3.4`;
+- bridge package: `6.3.5`;
 - extension package: `2.3.6`;
 - content runtime: `4.3.5`;
 - extension protocol: `5` only;
@@ -237,7 +237,7 @@ Canonical request state keeps independent effect domains for server coordination
 
 ### Steering and response epochs
 
-A steer keeps the request ID. Only the canonical server reducer increments `responseEpoch` after accepting proved new-turn evidence. Before dispatch, the server proves from canonical request state that prompt submission completed and generation is still active; disposable content flags are not readiness authority. The new user-turn boundary and assistant anchor belong to the new epoch. Evidence, artifacts, and terminal candidates from an older response epoch cannot settle the current request.
+A steer keeps the request ID. Only the canonical server reducer increments `responseEpoch` after accepting proved continuation evidence. Before dispatch, the server proves from canonical request state that prompt submission completed and generation is still active; disposable content flags are not readiness authority. ChatGPT may expose the steer instruction as a continuation key while leaving the final assistant turn attached to the original prompt user key. The adapter accepts that split boundary only when the active lease carries the current steer key and the observed original key is the exact user key recorded in the immediately previous response epoch. Evidence, artifacts, and terminal candidates from unrelated or older boundaries cannot settle the current request.
 
 ## Browser effects and retry policy
 

@@ -67,6 +67,25 @@ function canonicalSubmittedUserTurnKey(currentState = null) {
   return String(previous.submittedUserTurnKey || previous.observation?.turn?.userKey || '');
 }
 
+function previousResponseUserTurnKey(currentState = null) {
+  const history = Array.isArray(currentState?.response?.history) ? currentState.response.history : [];
+  return String(history.at(-1)?.userTurnKey || '');
+}
+
+function steerContinuationBoundaryMatches({
+  currentState,
+  observationAppliesToRequest,
+  submittedUserTurnKey,
+  contentSubmittedUserTurnKey,
+  observedUserTurnKey,
+} = {}) {
+  if (!observationAppliesToRequest || !submittedUserTurnKey || !observedUserTurnKey) return false;
+  if (Math.max(0, Number(currentState?.response?.epoch) || 0) < 1) return false;
+  if (contentSubmittedUserTurnKey !== submittedUserTurnKey) return false;
+  const originalUserTurnKey = previousResponseUserTurnKey(currentState);
+  return Boolean(originalUserTurnKey && observedUserTurnKey === originalUserTurnKey);
+}
+
 function terminalEvidence(observation, currentState, requestId, applies, submittedUserTurnKey = '') {
   const common = classifyTurnObservation(observation);
   const active = observation.activeRequest || null;
@@ -119,9 +138,18 @@ export function tabObservationToCanonicalEvent(
   const contentSubmittedUserTurnKey = String(observation.activeRequest?.submittedUserTurnKey || '');
   const submittedUserTurnKey = canonicalSubmittedUserTurnKey(currentState) || contentSubmittedUserTurnKey;
   const observedUserTurnKey = String(observation.turn?.userKey || '');
-  const responseBoundaryEstablished = currentState?.submission === SubmissionState.SUBMITTED
+  const directResponseBoundary = currentState?.submission === SubmissionState.SUBMITTED
     && Boolean(submittedUserTurnKey)
     && submittedUserTurnKey === observedUserTurnKey;
+  const steerContinuationBoundary = currentState?.submission === SubmissionState.SUBMITTED
+    && steerContinuationBoundaryMatches({
+      currentState,
+      observationAppliesToRequest,
+      submittedUserTurnKey,
+      contentSubmittedUserTurnKey,
+      observedUserTurnKey,
+    });
+  const responseBoundaryEstablished = directResponseBoundary || steerContinuationBoundary;
   const responseAppliesToRequest = observationAppliesToRequest && responseBoundaryEstablished;
   const requestReplaced = Boolean(bindingEstablished && observedRequestId && observedRequestId !== requestId);
   const conversationIdChanged = Boolean(
@@ -201,6 +229,8 @@ export function tabObservationToCanonicalEvent(
     scopedToRequest: responseAppliesToRequest,
     leaseScopedToRequest: observationAppliesToRequest,
     responseBoundaryEstablished,
+    steerContinuationBoundary,
+    originalSubmittedUserTurnKey: steerContinuationBoundary ? observedUserTurnKey : '',
     submittedUserTurnKey: responseBoundaryEstablished ? submittedUserTurnKey : '',
     meaningful: responseAppliesToRequest && Boolean(
       observation.generation?.state === GenerationState.ACTIVE

@@ -69,11 +69,11 @@ The request anchor advances in this order:
 1. pre-submit baseline;
 2. new matching user turn;
 3. first assistant turn after that user turn;
-4. optional later re-anchor after a confirmed steer submission.
+4. optional steer continuation evidence for a later response epoch.
 
 A newly inserted unrelated user turn must not be accepted merely because it is newer. Matching uses normalized prompt text with a conservative similarity threshold and exact marker support for E2E requests.
 
-A steer creates a new visible user turn and a new assistant turn while retaining the same bridge request ID. The old assistant placeholder must not remain authoritative after the steer is confirmed.
+After a steer, ChatGPT can expose a new continuation user key in the active request while the final assistant turn remains attached to the original prompt user key. The parser therefore preserves both pieces of evidence. The original key is accepted for the steered epoch only when it is the exact key stored in the immediately previous response history and the active lease still carries the proved continuation key.
 
 ## 6. Assistant phases
 

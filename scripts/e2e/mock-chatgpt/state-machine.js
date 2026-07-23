@@ -352,6 +352,14 @@ export class MockChatGptStateMachine {
     return key;
   }
 
+  appendSteer(text, request = null) {
+    const key = `steer-${randomUUID()}`;
+    this.turns.push({ role: 'steer', key, messageId: key, text: String(text), final: true });
+    this.activeRequest = request ? { ...request, submittedUserTurnKey: key } : this.activeRequest;
+    this.revision += 1;
+    return key;
+  }
+
   async generate(prompt, { onChange = () => {}, request = null } = {}) {
     const plan = await responseForPrompt(prompt, {
       previousAssistant: [...this.turns].reverse().find((turn) => turn.role === 'assistant')?.text || '',

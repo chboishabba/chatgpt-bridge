@@ -46,7 +46,7 @@ The workflow v3 and Protocol 5 atomic-publication hard cut is implemented. Core 
 
 ## Verified in the current tree
 
-- Versions are bridge `6.3.4`, extension `2.3.6`, content runtime `4.3.5`, protocol `5`, and workflow schema `3`.
+- Versions are bridge `6.3.5`, extension `2.3.6`, content runtime `4.3.5`, protocol `5`, and workflow schema `3`.
 - Protocol 5 has one shared manifest/validator and no payload-kind inference or Protocol 4 compatibility routing.
 - Effect-backed commands have one physical terminal lifecycle, and terminal state plus exact outbox envelope commit atomically.
 - Background owns release; unproved cleanup quarantines the tab instead of blocking unrelated work.

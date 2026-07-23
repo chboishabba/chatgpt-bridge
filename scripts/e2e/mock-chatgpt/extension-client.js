@@ -482,7 +482,7 @@ export class MockExtensionTab extends EventEmitter {
       throw error;
     }
     const preview = steerEffectResult({ request, body, step });
-    const userKey = this.state.appendUser(body.message, { ...request, responseEpoch: preview.targetResponseEpoch });
+    const userKey = this.state.appendSteer(body.message, { ...request, responseEpoch: preview.targetResponseEpoch });
     const result = steerEffectResult({ request, body, step, submittedUserTurnKey: userKey });
     this.state.activeRequest = { ...request, responseEpoch: result.targetResponseEpoch, submittedUserTurnKey: userKey };
     await this.#effect(envelope, step, result);

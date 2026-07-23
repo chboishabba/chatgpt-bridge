@@ -225,6 +225,59 @@ test('server-owned response boundary wins over a stale content projection', () =
   assert.equal(event.data.scopedToRequest, true);
 });
 
+
+test('final answer after steer may remain attached to the original prompt turn', () => {
+  const event = tabObservationToCanonicalEvent('req-1', 'client-1', {
+    observation: observation({
+      generation: { state: 'stopped', stopVisible: false },
+      output: { state: 'final', answer: 'STEER_RESULT BLUE', finalMessage: true, actionBarVisible: true },
+      stableForMs: 2_500,
+      activeRequest: { requestId: 'req-1', submittedUserTurnKey: 'user-steer', responseEpoch: 1 },
+      turn: {
+        key: 'assistant-final', userKey: 'user-root', index: 2,
+        messageId: 'assistant-final', finalMessage: true, actionBarVisible: true, stableForMs: 2_500,
+      },
+    }),
+  }, {
+    source: { conversationId: 'session-1' },
+    submission: 'submitted',
+    response: {
+      epoch: 1,
+      userTurnKey: 'user-steer',
+      history: [{ epoch: 0, userTurnKey: 'user-root', endedAt: 90 }],
+    },
+  }, 110);
+
+  assert.equal(event.data.responseBoundaryEstablished, true);
+  assert.equal(event.data.steerContinuationBoundary, true);
+  assert.equal(event.data.originalSubmittedUserTurnKey, 'user-root');
+  assert.equal(event.data.submittedUserTurnKey, 'user-steer');
+  assert.equal(event.data.scopedToRequest, true);
+  assert.equal(event.data.answer, 'STEER_RESULT BLUE');
+  assert.equal(event.data.completionCandidate, true);
+});
+
+test('original prompt boundary is not accepted after steer without exact epoch history evidence', () => {
+  const event = tabObservationToCanonicalEvent('req-1', 'client-1', {
+    observation: observation({
+      generation: { state: 'stopped' },
+      output: { state: 'final', answer: 'Stale answer' },
+      activeRequest: { requestId: 'req-1', submittedUserTurnKey: 'user-steer', responseEpoch: 1 },
+      turn: { key: 'assistant-old', userKey: 'user-root', index: 2 },
+    }),
+  }, {
+    source: { conversationId: 'session-1' },
+    submission: 'submitted',
+    response: { epoch: 1, userTurnKey: 'user-steer', history: [] },
+  }, 110);
+
+  assert.equal(event.data.responseBoundaryEstablished, false);
+  assert.equal(event.data.steerContinuationBoundary, false);
+  assert.equal(event.data.scopedToRequest, false);
+  assert.equal(event.data.answer, '');
+  assert.equal(event.data.completionCandidate, false);
+});
+
 test('accepted observation persists the proved response boundary in canonical state', () => {
   const create = {
     schemaVersion: 1,

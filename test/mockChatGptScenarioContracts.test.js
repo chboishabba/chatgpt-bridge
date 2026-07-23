@@ -168,15 +168,18 @@ test('mock ChatGPT acknowledges project-context synchronization exactly', async 
 test('mock ChatGPT keeps a steer window open and applies the override once', async () => {
   const state = new MockChatGptStateMachine({ tabId: 35 });
   const prompt = 'This tests steering an active request. Simulate a long multi-step task: compute the sum of squares from 1 through 240. Initial rule: output exactly STEER_RESULT RED.';
-  state.appendUser(prompt, { requestId: 'steer-local', leaseId: 'lease-local', ownerServerInstanceId: 'server-local', responseEpoch: 0 });
+  const originalUserTurnKey = state.appendUser(prompt, { requestId: 'steer-local', leaseId: 'lease-local', ownerServerInstanceId: 'server-local', responseEpoch: 0 });
   const generation = state.generate(prompt);
   await new Promise((resolve) => setTimeout(resolve, 120));
   assert.equal(state.generating, true);
   assert.equal(state.outputSnapshot().answer, '');
-  state.appendUser('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.', { requestId: 'steer-local', leaseId: 'lease-local', ownerServerInstanceId: 'server-local', responseEpoch: 1 });
+  const steerUserTurnKey = state.appendSteer('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.', { requestId: 'steer-local', leaseId: 'lease-local', ownerServerInstanceId: 'server-local', responseEpoch: 1 });
   await state.steer('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.');
   await generation;
-  assert.equal(state.outputSnapshot().answer, 'STEER_RESULT BLUE');
+  const snapshot = state.outputSnapshot();
+  assert.equal(snapshot.answer, 'STEER_RESULT BLUE');
+  assert.equal(snapshot.user.key, originalUserTurnKey, 'Real ChatGPT keeps the final assistant turn attached to the original prompt boundary');
+  assert.equal(state.activeRequest.submittedUserTurnKey, steerUserTurnKey, 'The active lease still exposes the accepted steer continuation key');
   assert.equal(state.turns.filter((turn) => turn.role === 'assistant' && turn.text === 'STEER_RESULT BLUE').length, 1);
   const steeredProgress = state.outputSnapshot().progressItems;
   assert.equal(steeredProgress.length, 1, 'The steered response epoch must expose its own completed reasoning summary');
@@ -191,7 +194,7 @@ test('a stale steered generation cannot terminate a newer passive generation', a
   state.appendUser(stalePrompt, { requestId: 'stale-steer', leaseId: 'lease-stale', ownerServerInstanceId: 'server-local', responseEpoch: 0 });
   const staleGeneration = state.generate(stalePrompt);
   await new Promise((resolve) => setTimeout(resolve, 120));
-  state.appendUser('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.', { requestId: 'stale-steer', leaseId: 'lease-stale', ownerServerInstanceId: 'server-local', responseEpoch: 1 });
+  state.appendSteer('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.', { requestId: 'stale-steer', leaseId: 'lease-stale', ownerServerInstanceId: 'server-local', responseEpoch: 1 });
   await state.steer('This new instruction overrides the original response rule. Output exactly STEER_RESULT BLUE.');
 
   const marker = 'PASSIVE_GENERATION_SURVIVED_LOCAL';
