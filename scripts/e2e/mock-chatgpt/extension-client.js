@@ -88,8 +88,9 @@ export class MockExtensionTab extends EventEmitter {
       browserTabId: this.tabId,
       launchToken: this.launchToken,
       requestedUrl: this.requestedUrl,
-      clientVersion: '4.3.1',
-      extensionVersion: '2.3.2',
+      clientVersion: '4.3.2',
+      extensionVersion: '2.3.3',
+      extensionBundleId: '6.3.1-20260723.1',
       extensionProtocolVersion: 5,
       visibilityState: 'visible',
       focused: true,
@@ -333,7 +334,7 @@ export class MockExtensionTab extends EventEmitter {
         return;
       }
       if (type === 'extension.reload') {
-        await this.#result(envelope, 'extension.reload.accepted', { accepted: true, expectedVersion: body.expectedVersion || '2.3.2' });
+        await this.#result(envelope, 'extension.reload.accepted', { accepted: true, expectedVersion: body.expectedVersion || '2.3.3' });
         setTimeout(() => { void this.reconnect({ replaceBackground: true, replaceContent: true }); }, 35);
         return;
       }

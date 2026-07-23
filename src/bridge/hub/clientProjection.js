@@ -70,6 +70,7 @@ export function publicClientProjection(client, { selectedClientId = '', serverIn
     requestedUrl: client.requestedUrl || '',
     clientVersion: client.clientVersion || '',
     extensionVersion: client.extensionVersion || '',
+    extensionBundleId: client.extensionBundleId || '',
     extensionProtocolVersion: client.extensionProtocolVersion || 0,
     compatibility: client.compatibility || null,
     compatible: client.compatibility?.compatible !== false,

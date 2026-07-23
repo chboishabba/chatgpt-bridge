@@ -53,6 +53,17 @@ test('startup extension bundle match requires both extension and content version
   ), false);
 });
 
+test('startup extension bundle match rejects a same-version client from another bundle', () => {
+  assert.equal(extensionClientMatchesBundle(
+    { extensionVersion: '1.2.3', extensionBundleId: 'old-build', clientVersion: '4.5.6' },
+    { version: '1.2.3', bundleId: 'current-build', contentVersion: '4.5.6' },
+  ), false);
+  assert.equal(extensionClientMatchesBundle(
+    { extensionVersion: '1.2.3', extensionBundleId: 'current-build', clientVersion: '4.5.6' },
+    { version: '1.2.3', bundleId: 'current-build', contentVersion: '4.5.6' },
+  ), true);
+});
+
 test('startup extension reload does not ask when the connected bundle is already current', async () => {
   const dir = await extensionDir();
   const installDir = await extensionInstallDir();
@@ -144,6 +155,7 @@ test('startup extension reload asks for confirmation and verifies reconnect vers
   assert.deepEqual(calls[1], {
     sourceClientId: 'ext-1',
     expectedVersion: '9.8.7',
+    expectedBundleId: '',
     reloadTabs: true,
     allowMaintenancePageBootstrap: true,
     timeoutMs: 30_000,
@@ -220,11 +232,11 @@ test('real E2E startup reload discovers clients through the full browser-client 
     api: async (_options, route, request = {}) => {
       calls.push({ route, request });
       if (route === '/browser/clients') {
-        return { clients: [{ id: 'ext-e2e', ready: true, compatible: true, extensionVersion: '2.3.2', extensionProtocolVersion: 5 }], selectedClientId: 'ext-e2e' };
+        return { clients: [{ id: 'ext-e2e', ready: true, compatible: true, extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', extensionProtocolVersion: 5 }], selectedClientId: 'ext-e2e' };
       }
       if (route === '/browser/extension/reload') {
         assert.equal(request.body.allowMaintenancePageBootstrap, true);
-        return { reconnected: { extensionVersion: '2.3.2' } };
+        return { reconnected: { extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1' } };
       }
       throw new Error(`Unexpected route: ${route}`);
     },
@@ -262,7 +274,7 @@ test('real E2E bootstraps an outdated protocol-5 tab, reloads it, and selects th
         clients: [reloaded
           ? {
               id: 'updated-tab', ready: true, compatible: true,
-              extensionVersion: '2.3.2', clientVersion: '4.3.1', extensionProtocolVersion: 5,
+              extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', clientVersion: '4.3.2', extensionProtocolVersion: 5,
               browserTabId: 42, launchToken, pageReady: true, composerReady: true, chatMainReady: true,
               capabilities: { browserTabs: true, sessionDeletion: true, promptSteering: true },
             }
@@ -278,7 +290,7 @@ test('real E2E bootstraps an outdated protocol-5 tab, reloads it, and selects th
       reloaded = true;
       assert.equal(request.body.sourceClientId, 'outdated-tab');
       assert.equal(request.body.allowMaintenancePageBootstrap, true);
-      return { reconnected: { id: 'updated-tab', extensionVersion: '2.3.2', clientVersion: '4.3.1' } };
+      return { reconnected: { id: 'updated-tab', extensionVersion: '2.3.3', extensionBundleId: '6.3.1-20260723.1', clientVersion: '4.3.2' } };
     }
     if (route === '/browser/select') {
       assert.equal(request.body.clientId, 'updated-tab');

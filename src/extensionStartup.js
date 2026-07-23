@@ -31,6 +31,7 @@ export async function readBundledExtensionInfo(extensionDir = DEFAULT_EXTENSION_
     manifestPath,
     contentPath,
     version,
+    bundleId: String(manifest?.version_name || '').trim(),
     contentVersion,
     name: String(manifest.name || 'ChatGPT Browser Bridge'),
   };
@@ -39,6 +40,7 @@ export async function readBundledExtensionInfo(extensionDir = DEFAULT_EXTENSION_
 export function extensionClientMatchesBundle(client = {}, info = {}) {
   const extensionMatches = String(client.extensionVersion || '') === String(info.version || '');
   if (!extensionMatches) return false;
+  if (info.bundleId && String(client.extensionBundleId || '') !== String(info.bundleId)) return false;
   if (!info.contentVersion) return true;
   return String(client.clientVersion || '') === String(info.contentVersion);
 }
@@ -177,14 +179,22 @@ export async function maybeReloadExtensionAtStartup({
   const result = await reload({
     sourceClientId: connected.client.id,
     expectedVersion: info.version,
+    expectedBundleId: info.bundleId,
     reloadTabs,
     allowMaintenancePageBootstrap: true,
     timeoutMs: reloadTimeoutMs,
   });
   const reconnectedVersion = String(result?.reconnected?.extensionVersion || result?.extensionVersion || '');
   const reconnectedContentVersion = String(result?.reconnected?.clientVersion || result?.clientVersion || '');
+  const reconnectedBundleId = String(result?.reconnected?.extensionBundleId || result?.extensionBundleId || '');
   if (reconnectedVersion && reconnectedVersion !== info.version) {
     const error = new Error(`Extension reconnected as ${reconnectedVersion}, expected ${info.version}. The current files were deployed to ${deployment.targetDir}, but Chrome is still loading a different unpacked directory. Open chrome://extensions, remove or reload the old entry, and use Load unpacked with ${deployment.targetDir} once.`);
+    error.code = 'EXTENSION_LOADED_PATH_MISMATCH';
+    error.deployment = deployment;
+    throw error;
+  }
+  if (info.bundleId && reconnectedBundleId !== info.bundleId) {
+    const error = new Error(`Extension reconnected from bundle ${reconnectedBundleId || 'unknown'}, expected ${info.bundleId}. Chrome is still loading a different unpacked directory than ${deployment.targetDir}.`);
     error.code = 'EXTENSION_LOADED_PATH_MISMATCH';
     error.deployment = deployment;
     throw error;
@@ -206,6 +216,7 @@ export async function maybeReloadExtensionAtStartup({
     waitedMs: connected.waitedMs,
     reconnectedVersion: reconnectedVersion || info.version,
     reconnectedContentVersion: reconnectedContentVersion || info.contentVersion,
+    reconnectedBundleId: reconnectedBundleId || info.bundleId,
     result,
     deployment,
     ...info,

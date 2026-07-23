@@ -99,7 +99,7 @@ export function renderMockChatPage(state = {}) {
   <main id="main" data-testid="chat-main">
     <header><button id="model-trigger" data-testid="model-switcher-dropdown-button" aria-haspopup="menu" aria-controls="intelligence-picker" aria-expanded="false">${escapeHtml(state.selectedModel || 'GPT Mock')}</button><button id="effort-trigger" data-testid="reasoning-effort-button" aria-haspopup="menu" aria-controls="intelligence-picker" aria-expanded="false">${escapeHtml(state.selectedEffort || 'high')}</button><span class="badge">offline deterministic state machine</span>${renderIntelligencePicker(state)}</header>
     <div id="conversation" aria-live="polite">${turns || '<div class="empty"><h1>How can I help?</h1><p>This page is a deterministic ChatGPT-shaped fixture used by local E2E.</p></div>'}</div>
-    <form data-testid="composer" id="composer">${renderComposerAttachments(state.attachments)}<input id="mock-file-input" type="file" multiple hidden><button type="button" data-testid="composer-attach-button" aria-label="Attach files">Attach</button><div id="prompt-textarea" contenteditable="true" role="textbox" data-testid="prompt-textarea" aria-label="Message ChatGPT"></div>${generation}</form>
+    <form data-testid="composer" id="composer">${renderComposerAttachments(state.attachments)}<input id="mock-file-input" type="file" multiple hidden><button type="button" data-testid="composer-attach-button" aria-label="Attach files">Attach</button><div id="prompt-textarea" contenteditable="plaintext-only" role="textbox" data-testid="prompt-textarea" aria-label="Message ChatGPT"></div>${generation}</form>
   </main>
 </div>
 ${previews}

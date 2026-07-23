@@ -116,7 +116,7 @@ export class BrowserTabCoordinator {
         return `${candidate.id || 'unknown'} url=${candidate.url || '(empty)'} reportedToken=${candidate.launchToken ? 'yes' : 'no'} urlToken=${urlToken ? 'yes' : 'no'} extension=${candidate.extensionVersion || '?'} content=${candidate.clientVersion || '?'}`;
       });
       const suffix = observed.length ? ` Observed clients: ${observed.join('; ')}` : ' No clients connected to this bridge instance.';
-      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.2 with content runtime 4.3.1 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
+      throw new Error(`${err.message}. The default browser must have ChatGPT Bridge extension 2.3.3 with content runtime 4.3.2 installed and configured for this server. Protocol 5 is required; clients that do not complete its handshake are rejected. Reload the unpacked extension and then reload the ChatGPT tab.${suffix}`);
     });
     const launchedClient = normalizeLaunchedClient(client, launchToken);
     return {
@@ -191,6 +191,7 @@ export class BrowserTabCoordinator {
       : this.hub.activeClient;
     if (!before?.id) throw new Error('No browser extension client is available for reload');
     const expectedVersion = String(options.expectedVersion || '');
+    const expectedBundleId = String(options.expectedBundleId || '');
     const timeoutMs = Math.max(2_000, Number(options.timeoutMs) || 20_000);
     const requestedAt = Date.now();
     const reloadServerUrl = options.serverUrl || this.runtimeOptions.publicBaseUrl;
@@ -199,6 +200,7 @@ export class BrowserTabCoordinator {
       const check = (client) => {
         if (!client?.ready) return false;
         if (expectedVersion && String(client.extensionVersion || '') !== expectedVersion) return false;
+        if (expectedBundleId && String(client.extensionBundleId || '') !== expectedBundleId) return false;
         return client.id === before.id || Number(client.browserTabId) === Number(before.browserTabId);
       };
       const handler = (client) => {
@@ -221,34 +223,11 @@ export class BrowserTabCoordinator {
       }
     });
 
-    const maintenanceUrl = options.allowMaintenancePageBootstrap === true
-      && !before.activeRequest?.requestId
-      && expectedVersion
-      && String(before.extensionVersion || '') !== expectedVersion
-      ? extensionMaintenanceReloadUrl(before, {
-          expectedVersion,
-          reloadTabs: options.reloadTabs !== false,
-          serverUrl: reloadServerUrl,
-        })
-      : '';
-    if (maintenanceUrl) {
-      try {
-        await this.runtimeOptions.openExternalUrl(maintenanceUrl, { allowExtensionMaintenance: true });
-        return {
-          accepted: { scheduled: true, bootstrapPage: true, inferredFromReconnect: true },
-          reconnected: await reconnectPromise,
-          recovery: { used: true, reason: 'maintenance_page_bootstrap' },
-        };
-      } catch (error) {
-        cancelWait();
-        reconnectPromise.catch(() => {});
-        const wrapped = new Error(`Extension maintenance bootstrap did not reconnect the updated runtime: ${error?.message || error}`);
-        wrapped.code = 'EXTENSION_MAINTENANCE_BOOTSTRAP_FAILED';
-        wrapped.cause = error;
-        throw wrapped;
-      }
-    }
-
+    // Prefer the canonical Protocol 5 reload command. Opening a chrome-extension://
+    // maintenance page through the operating system is only a compatibility
+    // fallback: process spawn does not prove that the browser accepted that URL,
+    // and making it the primary path caused updates to stall before any command
+    // reached the already-connected extension.
     const commandPromise = this.sendCommand('extension.reload', {
       reloadTabs: options.reloadTabs !== false,
       expectedVersion,
@@ -336,6 +315,9 @@ export class BrowserTabCoordinator {
     });
     if (expectedVersion && String(replacement.client?.extensionVersion || '') !== expectedVersion) {
       throw new Error(`Replacement tab connected with extension ${replacement.client?.extensionVersion || 'unknown'}, expected ${expectedVersion}`);
+    }
+    if (expectedBundleId && String(replacement.client?.extensionBundleId || '') !== expectedBundleId) {
+      throw new Error(`Replacement tab connected from bundle ${replacement.client?.extensionBundleId || 'unknown'}, expected ${expectedBundleId}`);
     }
     await this.sendCommand('browser.tab.close-owned', {
       tabId: Number(before.browserTabId),

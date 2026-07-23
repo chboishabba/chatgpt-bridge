@@ -46,7 +46,7 @@ test('composer submission uses the React keyboard path when an active steer has 
     querySelectorAll() { return []; },
     dispatchEvent(event) { events.push(event); return true; },
   };
-  sandbox.document.querySelectorAll = (selector) => selector === '#prompt-textarea[contenteditable="true"]' ? [composer] : [];
+  sandbox.document.querySelectorAll = (selector) => selector.includes('#prompt-textarea[contenteditable]') ? [composer] : [];
 
   const diagnostics = [];
   const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
@@ -60,6 +60,87 @@ test('composer submission uses the React keyboard path when an active steer has 
   assert.deepEqual(diagnostics.map((entry) => entry.name), ['send_button.not_found_keyboard_steer_fallback']);
   assert.equal(diagnostics[0].data.kind, 'steer');
   assert.equal(diagnostics[0].data.attempt, 2);
+});
+
+
+
+test('modern plaintext-only composer and visible chat surface satisfy initial page readiness', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  const hiddenMain = {
+    nodeType: 1,
+    tagName: 'MAIN',
+    isConnected: true,
+    hiddenForTest: true,
+    contains() { return false; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    getAttribute() { return null; },
+  };
+  const visibleMain = {
+    nodeType: 1,
+    tagName: 'MAIN',
+    isConnected: true,
+    contains(node) { return node === composer; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    getAttribute() { return null; },
+  };
+  const composer = {
+    nodeType: 1,
+    tagName: 'DIV',
+    isConnected: true,
+    isContentEditable: true,
+    disabled: false,
+    readOnly: false,
+    parentElement: visibleMain,
+    getAttribute(name) {
+      if (name === 'contenteditable') return 'plaintext-only';
+      if (name === 'role') return 'textbox';
+      if (name === 'id') return 'prompt-textarea';
+      return null;
+    },
+    closest(selector) { return selector.includes('main') ? visibleMain : null; },
+    querySelectorAll() { return []; },
+  };
+  sandbox.document.querySelectorAll = (selector) => {
+    if (selector.includes('#prompt-textarea[contenteditable]')) return [composer];
+    if (selector === 'main, [role="main"]') return [hiddenMain, visibleMain];
+    return [];
+  };
+
+  const isVisible = (element) => element !== hiddenMain;
+  const diagnostics = [];
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    diagnostic(name, data) { diagnostics.push({ name, data }); },
+    isVisible,
+  }));
+  assert.equal(commands.findComposer(), composer);
+  assert.equal(commands.findChatMain(), visibleMain);
+
+  const preparation = sandbox.ChatGptRequestPreparation.createRequestPreparation({
+    CONFIG: { pageReadyTimeoutMs: 5_000, pageReadySettleMs: 150 },
+    DOM_PARSER: {},
+    INTELLIGENCE_UI_TIMING: {},
+    async delay() {},
+    diagnostic() {},
+    emitChatEvent() {},
+    findChatMain: commands.findChatMain,
+    findComposer: commands.findComposer,
+    isVisible,
+    async openNewSession() {},
+    async readIntelligenceState() { return null; },
+    schedulePageStatus() {},
+    async selectSessionById() {},
+    send() {},
+    async trySelectIntelligenceOption() { return null; },
+  });
+  const readiness = preparation.chatPageReadiness();
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.chatMainReady, true);
+  assert.equal(readiness.composerReady, true);
+  assert.equal(readiness.composer, composer);
+  assert.equal(readiness.url, 'https://chatgpt.com/');
+  assert.equal(diagnostics.some((entry) => entry.name === 'dom_schema.composer_ambiguous'), false);
 });
 
 test('turn lookup honors the recorded index and otherwise chooses the newest duplicate React key', async () => {

@@ -155,21 +155,35 @@ function waitForComposer(request, timeoutMs = 30_000) {
   });
 }
 
+const EDITABLE_CONTENT_SELECTOR = '[contenteditable]:not([contenteditable="false"])';
+const COMPOSER_PRIMARY_SELECTOR = '#prompt-textarea[contenteditable]:not([contenteditable="false"]), textarea#prompt-textarea';
+
+function isEditableComposerElement(element) {
+  if (!element) return false;
+  if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') return !element.disabled && !element.readOnly;
+  const editable = String(element.getAttribute?.('contenteditable') || '').trim().toLowerCase();
+  return editable === 'true' || editable === 'plaintext-only' || (editable !== 'false' && element.isContentEditable === true);
+}
+
 function usableComposerCandidates(selector, root = document) {
   return Array.from(root.querySelectorAll(selector))
-    .filter((element) => isPrimaryChatSurfaceElement(element) && isVisible(element) && !element.disabled && !element.readOnly);
+    .filter((element) => isEditableComposerElement(element)
+      && isPrimaryChatSurfaceElement(element)
+      && isVisible(element)
+      && !element.disabled
+      && !element.readOnly);
 }
 
 function findComposer() {
-  const primary = usableComposerCandidates('#prompt-textarea[contenteditable="true"]');
+  const primary = usableComposerCandidates(COMPOSER_PRIMARY_SELECTOR);
   if (primary.length === 1) return primary[0];
   if (primary.length > 1) {
-    diagnostic('dom_schema.composer_ambiguous', { selector: '#prompt-textarea[contenteditable="true"]', count: primary.length });
+    diagnostic('dom_schema.composer_ambiguous', { selector: COMPOSER_PRIMARY_SELECTOR, count: primary.length });
     return null;
   }
 
-  const roots = Array.from(document.querySelectorAll('form, [data-testid*="composer" i]'))
-    .filter((root) => isVisible(root) && root.querySelector('[contenteditable="true"], textarea'));
+  const roots = Array.from(document.querySelectorAll('form, [data-testid*="composer" i], [data-type="unified-composer"]'))
+    .filter((root) => isVisible(root) && root.querySelector(`${EDITABLE_CONTENT_SELECTOR}, textarea`));
   const candidates = [];
   const seen = new Set();
   const add = (element) => {
@@ -178,9 +192,9 @@ function findComposer() {
     candidates.push(element);
   };
   for (const root of roots) {
-    for (const element of usableComposerCandidates('[role="textbox"][aria-label][contenteditable="true"]', root)) add(element);
-    for (const element of usableComposerCandidates('textarea[name="prompt-textarea"], textarea[aria-label]', root)) add(element);
-    for (const element of usableComposerCandidates('.ProseMirror[contenteditable="true"]', root)) add(element);
+    for (const element of usableComposerCandidates(`[role="textbox"]${EDITABLE_CONTENT_SELECTOR}`, root)) add(element);
+    for (const element of usableComposerCandidates('textarea[name="prompt-textarea"], textarea[aria-label], textarea[data-testid*="prompt" i]', root)) add(element);
+    for (const element of usableComposerCandidates(`.ProseMirror${EDITABLE_CONTENT_SELECTOR}`, root)) add(element);
   }
   if (candidates.length === 1) return candidates[0];
   if (candidates.length > 1) diagnostic('dom_schema.composer_ambiguous', { selector: 'composer scoped fallback', count: candidates.length });
@@ -296,8 +310,48 @@ function scopedQueryAll(roots, selector) {
   return result;
 }
 
+function isUsableChatSurface(element) {
+  return Boolean(element)
+    && element.isConnected !== false
+    && isPrimaryChatSurfaceElement(element)
+    && isVisible(element);
+}
+
 function findChatMain() {
-  return document.querySelector('main') || document.querySelector('[role="main"]') || null;
+  const composer = findComposer();
+  const composerMain = composer?.closest?.('main, [role="main"]') || null;
+  if (isUsableChatSurface(composerMain)) return composerMain;
+
+  const candidates = Array.from(document.querySelectorAll('main, [role="main"]'))
+    .filter(isUsableChatSurface);
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    const scored = candidates.map((element, index) => ({
+      element,
+      index,
+      score: (composer && element.contains?.(composer) ? 1000 : 0)
+        + Math.min(100, Number(element.querySelectorAll?.('[data-testid^="conversation-turn-"], section[data-turn], [data-message-author-role]').length || 0) * 10),
+    })).sort((a, b) => b.score - a.score || a.index - b.index);
+    if (scored[0].score > scored[1].score) return scored[0].element;
+    diagnostic('dom_schema.chat_main_ambiguous', { count: candidates.length, topScore: scored[0].score });
+    return null;
+  }
+
+  // Some ChatGPT layouts expose the composer inside a page surface without a
+  // semantic <main>. Keep readiness scoped to that verified composer surface
+  // instead of blocking the entire request before model or prompt handling.
+  const composerRoot = composer?.closest?.('form, [data-testid*="composer" i], [data-type="unified-composer"]') || null;
+  const derived = composerRoot?.closest?.('[data-testid="conversation-page"], [data-testid="chat-page"], [data-chat-root], [role="presentation"]')
+    || composerRoot?.parentElement
+    || null;
+  if (isUsableChatSurface(derived)) {
+    diagnostic('dom_schema.chat_main_derived_from_composer', {
+      tagName: derived.tagName || '',
+      testId: derived.getAttribute?.('data-testid') || '',
+    });
+    return derived;
+  }
+  return null;
 }
 
 function findTurnByKey(key, preferredIndex = -1) {

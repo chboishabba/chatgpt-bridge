@@ -159,7 +159,7 @@ test('Setup page exposes extension-only diagnostics and authentication', async (
     assert.equal(status.status, 200);
     const statusBody = await status.json();
     assert.equal(statusBody.bridgeTokenConfigured, true);
-    assert.equal(statusBody.extensionCompatibility.recommendedExtensionVersion, '2.3.2');
+    assert.equal(statusBody.extensionCompatibility.recommendedExtensionVersion, '2.3.3');
     const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8'));
     assert.equal(statusBody.bridgeVersion, packageJson.version);
 
@@ -489,7 +489,7 @@ test('real-browser E2E control endpoints preserve source identity and require UR
     assert.equal(extensionReload.body.reconnected.extensionVersion, '2.0.0');
     assert.deepEqual(fx.bridge.browserCalls[1], {
       type: 'reload-extension',
-      options: { sourceClientId: 'bootstrap-client', expectedVersion: '2.0.0', reloadTabs: true, allowMaintenancePageBootstrap: false, timeoutMs: 25_000 },
+      options: { sourceClientId: 'bootstrap-client', expectedVersion: '2.0.0', expectedBundleId: '', reloadTabs: true, allowMaintenancePageBootstrap: false, timeoutMs: 25_000 },
     });
 
     const tabReload = await fx.request('/browser/tabs/reload', {

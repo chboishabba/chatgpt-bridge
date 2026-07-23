@@ -11,6 +11,7 @@ test('mock ChatGPT layout exposes the selectors used by the content runtime', ()
   for (const selector of [
     'data-testid="chat-main"',
     'data-testid="prompt-textarea"',
+    'contenteditable="plaintext-only"',
     'data-testid="send-button"',
     'data-testid="model-switcher-dropdown-button"',
     'data-testid="reasoning-effort-button"',

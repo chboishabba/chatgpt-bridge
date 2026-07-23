@@ -663,6 +663,7 @@ export function createRouter(bridge, fileStore, eventBus = null, turnManager = n
       const result = await bridge.reloadExtension({
         sourceClientId: String(req.body?.sourceClientId || req.body?.clientId || ''),
         expectedVersion: String(req.body?.expectedVersion || ''),
+        expectedBundleId: String(req.body?.expectedBundleId || ''),
         reloadTabs: req.body?.reloadTabs !== false,
         allowMaintenancePageBootstrap: req.body?.allowMaintenancePageBootstrap === true,
         timeoutMs: Number(req.body?.timeoutMs) || 30_000,

@@ -96,6 +96,7 @@ export class HubClientMessageRouter {
     client.requestedUrl = String(payload.requestedUrl || launchMetadata.requestedUrl || client.requestedUrl || '');
     client.clientVersion = String(payload.clientVersion || payload.version || client.clientVersion || '');
     client.extensionVersion = String(payload.extensionVersion || client.extensionVersion || '');
+    client.extensionBundleId = String(payload.extensionBundleId || client.extensionBundleId || '');
     client.extensionProtocolVersion = Number(payload.extensionProtocolVersion ?? payload.protocolVersion ?? client.extensionProtocolVersion ?? 0) || 0;
     client.compatibility = evaluateExtensionCompatibility(client);
     client.capabilities = payload.capabilities && typeof payload.capabilities === 'object' ? payload.capabilities : {};

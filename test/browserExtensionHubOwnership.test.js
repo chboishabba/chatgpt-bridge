@@ -34,6 +34,7 @@ test('hub exposes server identity and preserves only immutable request routing o
     const client = hub.clients.find((item) => item.id === 'tab-a');
     assert.equal(hub.serverInstanceId, 'server-current');
     assert.equal(client.serverInstanceId, 'server-current');
+    assert.equal(client.extensionBundleId, '6.3.1-20260723.1');
     assert.equal(client.activeRequest.ownerServerInstanceId, 'server-other');
     assert.equal(client.transportHealth.outbox.observationCoalesced, 4);
     assert.equal(client.transportHealth.tabQueue.highWater, 3);

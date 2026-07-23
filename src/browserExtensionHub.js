@@ -235,6 +235,7 @@ export class BrowserExtensionHub extends EventEmitter {
       requestedUrl: '',
       clientVersion: '',
       extensionVersion: '',
+      extensionBundleId: '',
       extensionProtocolVersion: 0,
       compatibility: null,
       capabilities: {},
