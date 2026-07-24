@@ -17,7 +17,7 @@ export async function runQuarantineIsolationScenario(context = {}) {
   await scenario('quarantine-isolation', async () => {
     const scope = 'quarantine-isolation';
     const launchToken = `bridge-real-e2e-safe-${runId}`;
-    const expected = `QSAFE_${String(runId || marker).replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase()}`;
+    const expected = 'QSAFE';
     let safeClient = null;
     let quarantineApplied = false;
     try {

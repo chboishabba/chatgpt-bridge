@@ -210,6 +210,49 @@ test('normal observations cannot reconcile a newly dispatched passive write; onl
   }
 });
 
+test('diagnostics carrying a commandId remain non-terminal until the passive command result arrives', async () => {
+  const h = harness(145);
+  try {
+    await initialize(h);
+    await handleServerEnvelope({
+      ...h,
+      envelope: commandEnvelope('passive.prompt.submit', 'passive-diagnostic-command', 1, {
+        message: 'passive diagnostic marker',
+        preconditions: { commandType: 'passive.prompt.submit', message: 'passive diagnostic marker' },
+      }),
+    });
+
+    await handlePayload(h, null, h.state, {
+      type: 'diagnostic',
+      name: 'passive.prompt.submit.started',
+      commandId: 'passive-diagnostic-command',
+      requestId: '',
+    });
+    let runtime = await h.backgroundState.read(h.state.tabId);
+    assert.equal(runtime.commands['passive-diagnostic-command'].status, 'dispatched');
+    assert.equal(runtime.outbox.some((entry) => entry.commandId === 'passive-diagnostic-command'
+      && entry.messageType === ExtensionMessageType.COMMAND_RESULT), false);
+    assert.equal(h.sent.some((entry) => entry.messageType === ExtensionMessageType.TRANSPORT_DIAGNOSTIC
+      && entry.body?.name === 'passive.prompt.submit.started'), true);
+
+    await handlePayload(h, null, h.state, {
+      type: 'passive.prompt.submitted',
+      commandId: 'passive-diagnostic-command',
+      submittedUserTurnKey: 'passive-user-turn',
+      session: { id: 'passive-session' },
+    });
+    runtime = await h.backgroundState.read(h.state.tabId);
+    assert.equal(runtime.commands['passive-diagnostic-command'].status, 'succeeded');
+    const terminal = runtime.outbox.find((entry) => entry.commandId === 'passive-diagnostic-command'
+      && entry.messageType === ExtensionMessageType.COMMAND_RESULT);
+    assert.ok(terminal);
+    assert.equal(terminal.body.resultType, 'passive.prompt.submitted');
+    assert.equal(terminal.body.submittedUserTurnKey, 'passive-user-turn');
+  } finally {
+    h.restore();
+  }
+});
+
 test('a completed persisted download capture proves artifact.fetch success after content reload', async () => {
   const h = harness(144);
   try {

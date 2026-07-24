@@ -6,6 +6,7 @@
   function createComposerCommands(deps = {}) {
     const {
       CONFIG,
+      DOM_PARSER,
       conversationIdFromUrl,
       delay,
       diagnostic,
@@ -26,10 +27,25 @@
 
 function promptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore) {
   const turns = getTurnNodes();
-  const newUserTurn = turns
-    .map((turn, index) => ({ turn, index, key: turnKey(turn, index), role: turnRole(turn) }))
-    .find((item) => item.role === 'user' && item.key && !baselineTurnKeys.has(item.key));
+  const newUserTurns = turns
+    .map((turn, index) => ({
+      turn,
+      index,
+      key: turnKey(turn, index),
+      role: turnRole(turn),
+      text: visibleText(turn),
+    }))
+    .filter((item) => item.role === 'user' && item.key && !baselineTurnKeys.has(item.key));
+  const newUserTurn = newUserTurns.findLast((item) => DOM_PARSER.userTurnMatchesExpectedText(item.text, message));
   if (newUserTurn) return { confirmed: true, reason: 'new_user_turn', turnKey: newUserTurn.key, turnIndex: newUserTurn.index };
+  if (newUserTurns.length) {
+    return {
+      confirmed: false,
+      reason: 'new_user_turn_text_mismatch',
+      turnKey: newUserTurns.at(-1)?.key || '',
+      turnIndex: newUserTurns.at(-1)?.index ?? -1,
+    };
+  }
 
   const currentComposer = findComposer();
   if (message.trim() && composerBefore && (!currentComposer || !composerContainsText(currentComposer, message))) {
@@ -182,6 +198,25 @@ async function enterPrompt(message, request, options = {}) {
     kind, attempt: 1, method, ...evidence,
   });
   if (evidence.confirmed) return evidence;
+
+  const currentComposer = findComposer();
+  const textStillPresent = Boolean(message.trim() && currentComposer && composerContainsText(currentComposer, message));
+  const generationActive = Boolean(findStopButton() || isGenerating());
+  if (textStillPresent && !generationActive) {
+    try { restoreComposerText(currentComposer, composerBeforeText); } catch {}
+    diagnostic('prompt.submit.rolled_back', {
+      requestId: request?.requestId || '',
+      kind,
+      code: 'PROMPT_SUBMIT_NOT_EXECUTED',
+      restoredLength: composerBeforeText.length,
+    });
+    const error = new Error(`PROMPT_SUBMIT_NOT_EXECUTED: ChatGPT kept the ${kind} text in the composer and did not start generation`);
+    error.code = 'PROMPT_SUBMIT_NOT_EXECUTED';
+    error.retryable = true;
+    error.provenNotExecuted = true;
+    error.cancellationEvidence = { source: 'composer', reason: 'submitted_text_remained_without_generation' };
+    throw error;
+  }
 
   const error = new Error(`PROMPT_SUBMIT_UNCERTAIN: ChatGPT did not expose proof for the ${kind} submission; automatic retry is forbidden`);
   error.code = 'PROMPT_SUBMIT_UNCERTAIN';
@@ -671,6 +706,7 @@ function isUsableButton(element) {
 
     return Object.freeze({
       enterPrompt,
+      promptSubmissionEvidence,
       resolveSubmissionAckTimeoutMs,
       resolveSteerSubmitReadyTimeoutMs,
       waitForSteerSubmitButton,

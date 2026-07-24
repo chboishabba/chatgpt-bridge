@@ -368,7 +368,7 @@ export class MockExtensionTab extends EventEmitter {
         await this.#result(envelope, 'extension.reload.accepted', {
           accepted: true,
           scheduled: true,
-          expectedVersion: body.expectedVersion || '2.3.6',
+          expectedVersion: body.expectedVersion || '2.3.7',
           pageReload: { armed: true, owner: 'mock-main-world-timer', delayMs: Number(body.pageReloadDelayMs) || 2_500 },
           recoveryWake: { armed: true, owner: 'mock-extension-alarm' },
           reloadTrampoline: { planned: true, count: 1, owner: 'mock-local-bridge-page' },

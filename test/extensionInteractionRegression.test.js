@@ -5,6 +5,13 @@ import { bootstrapExtensionContentRuntime } from './helpers/extensionContentRunt
 function composerDependencies(overrides = {}) {
   return {
     CONFIG: {},
+    DOM_PARSER: {
+      userTurnMatchesExpectedText(actual, expected) {
+        const a = String(actual || '').trim();
+        const e = String(expected || '').trim();
+        return !e || a === e || a.endsWith(`\n${e}`) || a.startsWith(`${e}\n`);
+      },
+    },
     conversationIdFromUrl() { return 'session'; },
     async delay() {},
     diagnostic() {},
@@ -243,4 +250,129 @@ test('steer acknowledgement uses a longer bounded proof window than an ordinary 
   assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: {} }, 'steer'), 30_000);
   assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: { promptSubmitAckTimeoutMs: 12_000 } }, 'steer'), 30_000);
   assert.equal(commands.resolveSubmissionAckTimeoutMs({ options: { steerSubmitAckTimeoutMs: 8_000 } }, 'steer'), 8_000);
+});
+
+
+test('prompt submission evidence rejects an unrelated new user turn even when the composer cleared', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  const unrelatedTurn = { textContent: 'stale passive workflow prompt' };
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    DOM_PARSER: sandbox.ChatGptDomParserCore,
+    getTurnNodes() { return [unrelatedTurn]; },
+    turnKey() { return 'user-stale'; },
+    turnRole() { return 'user'; },
+    visibleText(node) { return node.textContent; },
+  }));
+  const evidence = commands.promptSubmissionEvidence(
+    { requestId: 'project-request' },
+    new Set(),
+    'current project-context prompt',
+    { textContent: 'current project-context prompt' },
+  );
+  assert.equal(evidence.confirmed, false);
+  assert.equal(evidence.reason, 'new_user_turn_text_mismatch');
+  assert.equal(evidence.turnKey, 'user-stale');
+});
+
+test('prompt submission evidence accepts an attachment-prefixed turn only when its prompt text matches', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  const matchingTurn = { textContent: 'project.zip\nZIP-архив\n\ncurrent project-context prompt' };
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    DOM_PARSER: sandbox.ChatGptDomParserCore,
+    getTurnNodes() { return [matchingTurn]; },
+    turnKey() { return 'user-project'; },
+    turnRole() { return 'user'; },
+    visibleText(node) { return node.textContent; },
+  }));
+  const evidence = commands.promptSubmissionEvidence(
+    { requestId: 'project-request' },
+    new Set(),
+    'current project-context prompt',
+    { textContent: 'current project-context prompt' },
+  );
+  assert.equal(evidence.confirmed, true);
+  assert.equal(evidence.reason, 'new_user_turn');
+  assert.equal(evidence.turnKey, 'user-project');
+});
+
+test('a proven unsubmitted passive prompt is rolled back instead of poisoning the next request', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  sandbox.DataTransfer = class {
+    constructor() { this.value = ''; }
+    setData(_type, value) { this.value = String(value); }
+  };
+  sandbox.ClipboardEvent = class {
+    constructor(type, options = {}) { this.type = type; this.clipboardData = options.clipboardData; }
+  };
+  sandbox.InputEvent = class { constructor(type) { this.type = type; } };
+
+  const sendButton = {
+    disabled: false,
+    isConnected: true,
+    getAttribute(name) { return name === 'data-testid' ? 'send-button' : null; },
+    click() {},
+  };
+  const form = {
+    nodeType: 1,
+    tagName: 'FORM',
+    isConnected: true,
+    matches() { return false; },
+    closest() { return null; },
+    querySelectorAll(selector) {
+      if (selector.includes('send') || selector.includes('Send') || selector === 'button, [role="button"]') return [sendButton];
+      return [];
+    },
+    contains(node) { return node === composer || node === sendButton; },
+    getAttribute() { return null; },
+  };
+  const composer = {
+    nodeType: 1,
+    tagName: 'TEXTAREA',
+    value: '',
+    disabled: false,
+    readOnly: false,
+    isConnected: true,
+    parentElement: form,
+    focus() {},
+    getAttribute(name) { return name === 'id' ? 'prompt-textarea' : null; },
+    closest(selector) { return selector === 'form' ? form : selector.includes('main') ? main : null; },
+    querySelectorAll() { return []; },
+    dispatchEvent(event) {
+      if (event?.type === 'paste') this.value = String(event.clipboardData?.value || '');
+      return true;
+    },
+  };
+  const main = {
+    nodeType: 1,
+    tagName: 'MAIN',
+    isConnected: true,
+    contains(node) { return node === composer || node === form || node === sendButton; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    getAttribute() { return null; },
+  };
+  sandbox.document.querySelectorAll = (selector) => {
+    if (selector.includes('textarea#prompt-textarea')) return [composer];
+    if (selector === 'main, [role="main"]') return [main];
+    return [];
+  };
+
+  const diagnostics = [];
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    CONFIG: { promptSubmitAckTimeoutMs: 1_000 },
+    DOM_PARSER: sandbox.ChatGptDomParserCore,
+    diagnostic(name, data) { diagnostics.push({ name, data }); },
+    async delay() {},
+  }));
+
+  await assert.rejects(
+    commands.enterPrompt('stale passive workflow prompt', { requestId: 'passive-stale', options: {} }, { kind: 'passive' }),
+    (error) => {
+      assert.equal(error.code, 'PROMPT_SUBMIT_NOT_EXECUTED');
+      assert.equal(error.provenNotExecuted, true);
+      return true;
+    },
+  );
+  assert.equal(composer.value, '');
+  assert.equal(diagnostics.some((entry) => entry.name === 'prompt.submit.rolled_back'), true);
 });

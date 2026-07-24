@@ -10,6 +10,16 @@ const NON_BLOCKING_CONTENT_OPERATIONS = new Set(['bridge.download.capture.wait',
 const DIAGNOSTIC_TYPES = new Set(['diagnostic', 'page.status', 'page.changed', 'status', 'chat.event']);
 const COMMAND_PROGRESS_TYPES = new Set(['artifact.data.started', 'artifact.data.chunk']);
 
+function isEphemeralPayload(payload = {}) {
+  const type = String(payload?.type || '');
+  return type === 'hello'
+    || type === 'pong'
+    || type === 'tab.observation'
+    || type === 'command.progress'
+    || DIAGNOSTIC_TYPES.has(type)
+    || COMMAND_PROGRESS_TYPES.has(type);
+}
+
 function requestIdentity(record = {}) {
   return {
     requestId: String(record.requestId || ''), leaseId: String(record.leaseId || ''),
@@ -82,7 +92,7 @@ function commandResultBody(command, payload = {}) {
 
 async function settleResultCommand(deps, state, payload) {
   const payloadType = String(payload?.type || '');
-  if (payloadType === 'standalone.reconciliation' || payloadType === 'command.progress' || COMMAND_PROGRESS_TYPES.has(payloadType)) return false;
+  if (payloadType === 'standalone.reconciliation' || isEphemeralPayload(payload)) return false;
   const commandId = String(payload.commandId || '');
   if (!commandId) return false;
   const runtime = await deps.backgroundState.read(state.tabId);
@@ -112,16 +122,17 @@ async function settleResultCommand(deps, state, payload) {
 
 async function sendEphemeralPayload(deps, state, payload) {
   const type = String(payload.type || '');
-  if (type === 'hello') return deps.sendProtocolMessage(state, MessageType.TRANSPORT_HELLO, withoutType(payload));
-  if (type === 'pong') return deps.sendProtocolMessage(state, MessageType.TRANSPORT_PONG, withoutType(payload));
-  if (type === 'tab.observation') return deps.sendProtocolMessage(state, MessageType.TAB_OBSERVATION, withoutType(payload));
-  if (DIAGNOSTIC_TYPES.has(type)) return deps.sendProtocolMessage(state, MessageType.TRANSPORT_DIAGNOSTIC, { ...withoutType(payload), diagnosticType: type });
-  if (type === 'command.progress' || COMMAND_PROGRESS_TYPES.has(type)) {
-    return deps.sendProtocolMessage(state, MessageType.COMMAND_PROGRESS, {
+  if (type === 'hello') await deps.sendProtocolMessage(state, MessageType.TRANSPORT_HELLO, withoutType(payload));
+  else if (type === 'pong') await deps.sendProtocolMessage(state, MessageType.TRANSPORT_PONG, withoutType(payload));
+  else if (type === 'tab.observation') await deps.sendProtocolMessage(state, MessageType.TAB_OBSERVATION, withoutType(payload));
+  else if (DIAGNOSTIC_TYPES.has(type)) {
+    await deps.sendProtocolMessage(state, MessageType.TRANSPORT_DIAGNOSTIC, { ...withoutType(payload), diagnosticType: type });
+  } else if (type === 'command.progress' || COMMAND_PROGRESS_TYPES.has(type)) {
+    await deps.sendProtocolMessage(state, MessageType.COMMAND_PROGRESS, {
       ...withoutType(payload), progressType: String(payload.progressType || type),
     }, { commandId: payload.commandId, lease: null });
-  }
-  return null;
+  } else return false;
+  return true;
 }
 
 export async function handleEffectBegin(deps, state, message) {
@@ -208,8 +219,8 @@ export async function handlePayload(deps, _port, state, payload) {
     await reconcileReloadedCommands(deps, state, payload);
   }
 
-  const settled = await settleResultCommand(deps, state, payload);
-  if (!settled) await sendEphemeralPayload(deps, state, payload);
+  const ephemeral = await sendEphemeralPayload(deps, state, payload);
+  if (!ephemeral) await settleResultCommand(deps, state, payload);
 
   if (payload.type === 'hello') {
     await deps.replayCriticalOutbox(state);
@@ -220,8 +231,8 @@ export async function handlePayload(deps, _port, state, payload) {
       if (state.reloadReconciliationCommandIds instanceof Set) {
         await reconcileReloadedCommands(deps, state, queuedPayload);
       }
-      const queuedSettled = await settleResultCommand(deps, state, queuedPayload);
-      if (!queuedSettled) await sendEphemeralPayload(deps, state, queuedPayload);
+      const queuedEphemeral = await sendEphemeralPayload(deps, state, queuedPayload);
+      if (!queuedEphemeral) await settleResultCommand(deps, state, queuedPayload);
     }
     await recoverAfterContentReload(deps, state);
   }

@@ -275,6 +275,32 @@ test('layout capture chunks stay non-terminal in background and the durable term
   } finally { h.restore(); }
 });
 
+test('command registry keeps result commands pending across progress before the terminal result', async () => {
+  const delivered = [];
+  const registry = new BridgeCommandRegistry({ hub: {
+    sendToClientWithDelivery(clientId, payload) {
+      delivered.push({ clientId, payload });
+      return { client: { id: clientId }, delivered: Promise.resolve() };
+    },
+  } });
+  try {
+    const pending = registry.send('passive.prompt.submit', { message: 'progress marker' }, {
+      sourceClientId: 'tab-progress', commandId: 'progress-command', timeoutMs: 1_000,
+    });
+    await waitFor(() => delivered.length === 1);
+    assert.equal(registry.handleResponse('tab-progress', {
+      type: 'command.progress', progressType: 'passive.prompt.submit.started', commandId: 'progress-command',
+    }), true);
+    assert.equal(registry.has('progress-command'), true);
+    registry.handleResponse('tab-progress', {
+      type: 'command.result', resultType: 'passive.prompt.submitted', commandId: 'progress-command',
+      submittedUserTurnKey: 'progress-user-turn',
+    });
+    const result = await pending;
+    assert.equal(result.submittedUserTurnKey, 'progress-user-turn');
+  } finally { registry.close(); }
+});
+
 test('command registry reconstructs chunked layout capture without putting HTML in the terminal result', async () => {
   const delivered = [];
   const registry = new BridgeCommandRegistry({ hub: {
@@ -378,7 +404,7 @@ test('extension reload waits for the server ACK of its durable command acceptanc
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.6',
+    expectedVersion: '2.3.7',
   });
 
   await new Promise((resolve) => setTimeout(resolve, 80));
@@ -460,7 +486,7 @@ test('extension reload stages a localhost trampoline before restarting the runti
     sourceLaunchToken: 'bridge-real-e2e-trampoline',
     temporaryServerUrl: 'http://127.0.0.1:18181',
     commandId: 'reload-trampoline-command',
-    expectedVersion: '2.3.6',
+    expectedVersion: '2.3.7',
   });
   await handleServerEnvelope({
     ...h,
