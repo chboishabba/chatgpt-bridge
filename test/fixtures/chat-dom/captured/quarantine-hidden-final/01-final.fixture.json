@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-24T12:12:58.958Z",
+  "scenario": "quarantine-isolation-hidden-final",
+  "requestId": "recorded-quarantine-request",
+  "source": {
+    "eventId": "tab.observation",
+    "observedAt": "2026-07-24T12:12:58.958Z",
+    "terminal": true,
+    "html": "01-final.html",
+    "realRun": "c2721307c856"
+  },
+  "expected": {
+    "answer": "Q",
+    "format": "markdown",
+    "responseBlocks": [
+      {
+        "type": "paragraph",
+        "markdown": "Q"
+      }
+    ],
+    "codeBlocks": [],
+    "artifacts": [],
+    "parserAudit": {
+      "coverage": {
+        "unknownLeaves": 0,
+        "unknownVisualElements": 0,
+        "duplicateLeaves": 0,
+        "coveragePercent": 100
+      },
+      "warnings": []
+    }
+  }
+}

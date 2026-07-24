@@ -53,7 +53,7 @@ function effectResultBody(step = {}, request = {}, result = {}) {
 }
 
 export class MockExtensionTab extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', state = null } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, state = null } = {}) {
     super();
     if (!bridgeUrl) throw new TypeError('Mock extension tab requires bridgeUrl');
     this.bridgeUrl = String(bridgeUrl).replace(/\/$/, '');
@@ -63,6 +63,7 @@ export class MockExtensionTab extends EventEmitter {
     this.pageOrigin = String(pageOrigin || '').replace(/\/$/, '');
     this.launchToken = String(launchToken || '');
     this.requestedUrl = String(requestedUrl || 'https://chatgpt.com/');
+    this.active = active !== false;
     this.clientId = `mock-extension-tab-${this.tabId}`;
     this.backgroundEpoch = `mock-background-${randomUUID()}`;
     this.contentEpoch = `mock-content-${randomUUID()}`;
@@ -111,8 +112,8 @@ export class MockExtensionTab extends EventEmitter {
       extensionVersion: MOCK_EXTENSION_RUNTIME_IDENTITY.extensionVersion,
       extensionBundleId: MOCK_EXTENSION_RUNTIME_IDENTITY.extensionBundleId,
       extensionProtocolVersion: 5,
-      visibilityState: 'visible',
-      focused: true,
+      visibilityState: this.active ? 'visible' : 'hidden',
+      focused: this.active,
       documentReadyState: 'complete',
       pageReady: true,
       composerReady: true,
@@ -546,6 +547,7 @@ export class MockExtensionTab extends EventEmitter {
     const opened = await this.registry.openTab({
       launchToken: body.launchToken,
       requestedUrl: body.url || 'https://chatgpt.com/',
+      active: body.active !== false,
     });
     await this.#result(envelope, 'browser.tab.opened', {
       tabId: opened.tabId,
@@ -654,8 +656,8 @@ export class MockExtensionTab extends EventEmitter {
       url: this.state.url,
       title: 'ChatGPT',
       conversationId: this.state.conversationId,
-      visibility: 'visible',
-      focused: true,
+      visibility: this.active ? 'visible' : 'hidden',
+      focused: this.active,
       document: { state: 'ready', readyState: 'complete', pageReady: true, chatMainReady: true },
       composer: { state: 'ready', ready: true, sendVisible: this.state.generating && this.state.steerReady, attachments: this.state.attachments.map((item) => ({ ...item })) },
       activeRequest: active,
@@ -725,13 +727,16 @@ export class MockChatGptBrowser extends EventEmitter {
     this.nextTabId = 100;
   }
 
-  async openTab({ launchToken = '', requestedUrl = 'https://chatgpt.com/', tabId = null } = {}) {
+  async openTab({ launchToken = '', requestedUrl = 'https://chatgpt.com/', tabId = null, active = true } = {}) {
     const resolvedTabId = Number.isInteger(tabId) ? tabId : this.nextTabId++;
     const state = new MockChatGptStateMachine({ tabId: resolvedTabId, origin: 'https://chatgpt.com' });
     try {
       const requestedSessionId = new URL(String(requestedUrl || 'https://chatgpt.com/')).pathname.match(/^\/c\/([^/?#]+)/)?.[1] || '';
       if (requestedSessionId) state.selectSession(requestedSessionId);
     } catch {}
+    if (active !== false) {
+      for (const existing of this.tabs.values()) existing.active = false;
+    }
     const tab = new MockExtensionTab({
       bridgeUrl: this.bridgeUrl,
       bridgeToken: this.bridgeToken,
@@ -740,6 +745,7 @@ export class MockChatGptBrowser extends EventEmitter {
       pageOrigin: this.pageOrigin,
       launchToken,
       requestedUrl,
+      active,
       state,
     });
     this.tabs.set(resolvedTabId, tab);

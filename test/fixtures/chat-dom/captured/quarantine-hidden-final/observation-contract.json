@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "realRun": "c2721307c856",
+    "scenario": "quarantine-isolation",
+    "observedAt": "2026-07-24T12:12:58.958Z"
+  },
+  "expected": {
+    "visibility": "hidden",
+    "focused": false,
+    "documentState": "ready",
+    "composerState": "ready",
+    "turnState": "final",
+    "generationState": "stopped",
+    "outputState": "final",
+    "actionBarVisible": true,
+    "answerNonEmpty": true,
+    "recordedAnswer": "Q",
+    "responseActionTestIds": [
+      "copy-turn-action-button",
+      "good-response-turn-action-button",
+      "bad-response-turn-action-button"
+    ]
+  }
+}

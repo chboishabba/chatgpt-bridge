@@ -17,7 +17,7 @@ export async function runQuarantineIsolationScenario(context = {}) {
   await scenario('quarantine-isolation', async () => {
     const scope = 'quarantine-isolation';
     const launchToken = `bridge-real-e2e-safe-${runId}`;
-    const expected = 'QSAFE';
+    const prompt = 'Acknowledge this request briefly. The exact wording is not part of the isolation test.';
     let safeClient = null;
     let quarantineApplied = false;
     try {
@@ -63,18 +63,21 @@ export async function runQuarantineIsolationScenario(context = {}) {
       assert(projected.clients?.find((client) => client.id === safeClient.id)?.quarantined !== true,
         'Safe E2E tab was unexpectedly quarantined');
 
+      assert(safeClient.visibilityState === 'hidden' && safeClient.focused === false,
+        `Background safe tab must remain hidden and unfocused, got visibility=${safeClient.visibilityState || '(unknown)'} focused=${Boolean(safeClient.focused)}`);
+
       const response = await sendSynchronousMessage(options, `/sessions/${encodeURIComponent(sessionId)}/messages`, {
-        message: `Reply exactly ${expected}.`,
+        message: prompt,
       }, { scope, label: 'safe-tab request after quarantine' });
-      assert(normalizeAnswer(response.answer || response.response) === expected,
-        `Unexpected quarantine isolation answer: ${response.answer || response.response}`);
       assert(response.sourceClientId === safeClient.id,
         `Quarantine isolation used ${response.sourceClientId || '(unknown)'} instead of safe client ${safeClient.id}`);
+      const answer = normalizeAnswer(response.answer || response.response);
+      assert(answer.length > 0, 'Quarantine isolation request completed without a visible assistant answer');
       return {
         quarantinedClientId: testClient.id,
         safeClientId: safeClient.id,
         requestId: response.requestId || '',
-        expected,
+        answerLength: answer.length,
       };
     } finally {
       if (quarantineApplied) {

@@ -71,7 +71,7 @@ function renderTurn(turn = {}, index = 0) {
     <div class="turn-body" data-message-author-role="${role}" data-message-id="${escapeHtml(turn.messageId || turn.key)}" data-message-model-slug="gpt-mock">
       <div class="markdown prose">${role === 'assistant' ? renderMarkdown(turn.text || '') : `<p>${escapeHtml(turn.text || '')}</p>`}</div>
       ${artifacts}
-      ${role === 'assistant' && turn.final ? '<div role="group" aria-label="Response actions"><button data-testid="copy-turn-action-button">Copy</button></div>' : ''}
+      ${role === 'assistant' && turn.final ? '<div role="group" aria-label="Response actions"><button data-testid="copy-turn-action-button" aria-label="Copy response">Copy</button><button data-testid="good-response-turn-action-button" aria-label="Good response">Good</button><button data-testid="bad-response-turn-action-button" aria-label="Bad response">Bad</button></div>' : ''}
     </div>
   </section>`;
 }
