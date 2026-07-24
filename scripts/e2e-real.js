@@ -37,6 +37,7 @@ import { abortableDelay, createE2eInterruptionController, createE2eSignalCoordin
 import { stopInterruptedBridgeWork } from './e2e/interrupted-cleanup.js';
 import { initializeDiagnostics, resolveBridgeRuntime, writeDiagnosticCheckpoint } from './e2e/runtime.js';
 import { startMockChatGptRuntime, stopMockChatGptRuntime } from './e2e/mock-chatgpt/runtime.js';
+import { cleanupExactE2eDownloadFiles, verifyExactE2eDownloadFilesAbsent } from './e2e/download-source-cleanup.js';
 import { alternativeSelectionOption, explicitSelectionCases, intelligenceSnapshotFromApplied, normalizeSelectionValue, optionLabel, selectedOption, selectionOptionMatches } from './e2e/intelligence-selection.js';
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 process.env.BRIDGE_DISABLE_NOTIFICATIONS = '1';
@@ -527,19 +528,6 @@ function artifactEventData(event = {}) {
   return event?.data && typeof event.data === 'object' ? event.data : {};
 }
 
-async function verifyRemovedDownloadSourcesRemainAbsent(audits = []) {
-  const verified = [];
-  for (const audit of Array.isArray(audits) ? audits : []) {
-    if (audit?.status !== 'removed' || !audit.path) continue;
-    let stillExists = false;
-    try { await fs.lstat(audit.path); stillExists = true; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
-    audit.finalPathAbsent = !stillExists;
-    verified.push({ artifactId: audit.artifactId || '', path: audit.path, absent: !stillExists, downloadId: audit.downloadId ?? null });
-    assert(!stillExists, `Browser download source reappeared or was not removed by final cleanup verification: ${audit.path}`);
-  }
-  return verified;
-}
-
 async function auditArtifactSourceCleanup(options, artifactId) {
   testLog('search', 'artifact', 'Looking for the concrete browser-download cleanup audit', { artifactId });
   testLog('wait', 'artifact', 'Waiting for download completion and safe source cleanup metadata', { artifactId, timeoutMs: 3_000 });
@@ -565,6 +553,8 @@ async function auditArtifactSourceCleanup(options, artifactId) {
       path: data.path || '',
       reason: data.reason || '',
       downloadId: data.downloadId ?? null,
+      capturedStatIdentity: data.capturedStatIdentity && typeof data.capturedStatIdentity === 'object' ? data.capturedStatIdentity : null,
+      captureIdentity: data.captureIdentity && typeof data.captureIdentity === 'object' ? data.captureIdentity : null,
     };
   }, { timeoutMs: 3_000, intervalMs: 100, message: `source cleanup audit for artifact ${artifactId}` });
 
@@ -945,7 +935,8 @@ async function run() {
       else await api(options, '/browser/select', { method: 'DELETE' });
     } catch {}
     try {
-      report.finalDownloadCleanupVerification = await verifyRemovedDownloadSourcesRemainAbsent(report.downloadCleanupAudits);
+      report.finalDownloadCleanupActions = await cleanupExactE2eDownloadFiles(report.downloadCleanupAudits, { testLog });
+      report.finalDownloadCleanupVerification = await verifyExactE2eDownloadFilesAbsent(report.downloadCleanupAudits);
     } catch (cleanupVerificationError) {
       report.downloadCleanupVerificationError = cleanupVerificationError.message;
       if (!interruption.requested) {

@@ -486,7 +486,9 @@ test('real E2E runner covers reasoning, steer, files, ZIP, project context, reus
   assert.match(source, /response-parsing-diff\.json/);
   assert.match(source, /captureDomTimeline: true/);
   assert.match(source, /Browser download cleanup reported success, but the captured file still exists/);
-  assert.match(source, /verifyRemovedDownloadSourcesRemainAbsent/);
+  assert.match(source, /cleanupExactE2eDownloadFiles/);
+  assert.match(source, /verifyExactE2eDownloadFilesAbsent/);
+  assert.match(source, /finalDownloadCleanupActions/);
   assert.match(source, /finalDownloadCleanupVerification/);
   assert.match(source, /Waiting for ChatGPT composer/);
   assert.match(source, /!candidate\.pageReady \|\| !candidate\.composerReady \|\| !candidate\.chatMainReady/);

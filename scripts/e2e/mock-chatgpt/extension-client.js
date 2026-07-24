@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from '../../../src/runtime/ws.js';
 import { ExtensionMessageType, createExtensionEnvelope, validateExtensionEnvelope } from '../../../src/bridge/protocol/v5.js';
@@ -8,6 +11,7 @@ import { renderMockChatPage } from './render.js';
 import { MockChatGptStateMachine } from './state-machine.js';
 import { LOCAL_E2E_COMMAND_TYPE_SET } from './contract.js';
 import { effectEnvelopeOptions, effortsListResult, intelligenceApplyResult, modelsListResult, preparationEffectResult, steerEffectResult } from './command-results.js';
+import { removeCapturedBrowserDownload } from '../../../src/bridge/browserDownloads.js';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const text = (value) => String(value ?? '').trim();
@@ -53,7 +57,7 @@ function effectResultBody(step = {}, request = {}, result = {}) {
 }
 
 export class MockExtensionTab extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, state = null } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null } = {}) {
     super();
     if (!bridgeUrl) throw new TypeError('Mock extension tab requires bridgeUrl');
     this.bridgeUrl = String(bridgeUrl).replace(/\/$/, '');
@@ -64,6 +68,7 @@ export class MockExtensionTab extends EventEmitter {
     this.launchToken = String(launchToken || '');
     this.requestedUrl = String(requestedUrl || 'https://chatgpt.com/');
     this.active = active !== false;
+    this.focused = this.active && focused === true;
     this.clientId = `mock-extension-tab-${this.tabId}`;
     this.backgroundEpoch = `mock-background-${randomUUID()}`;
     this.contentEpoch = `mock-content-${randomUUID()}`;
@@ -113,7 +118,7 @@ export class MockExtensionTab extends EventEmitter {
       extensionBundleId: MOCK_EXTENSION_RUNTIME_IDENTITY.extensionBundleId,
       extensionProtocolVersion: 5,
       visibilityState: this.active ? 'visible' : 'hidden',
-      focused: this.active,
+      focused: this.active && this.focused,
       documentReadyState: 'complete',
       pageReady: true,
       composerReady: true,
@@ -562,15 +567,36 @@ export class MockExtensionTab extends EventEmitter {
     const identity = envelope.body?.artifact || {};
     const artifact = this.state.artifactById(text(identity.id || identity.candidateId));
     if (!artifact) throw Object.assign(new Error(`Mock artifact not found: ${identity.id || identity.candidateId || identity.name}`), { code: 'ARTIFACT_NOT_FOUND' });
+    const captureSource = text(artifact.materializationSource) || 'page-url';
+    if (captureSource === 'chrome-downloads') {
+      const download = await this.registry.createBrowserDownload(artifact);
+      await this.#result(envelope, 'artifact.data.done', {
+        type: 'artifact.data.done',
+        artifactId: artifact.id,
+        name: download.name,
+        mime: artifact.mime,
+        size: download.size,
+        encodedSize: 0,
+        filePath: download.filePath,
+        captureSource,
+        downloadId: download.downloadId,
+        browserCaptureStartedAt: download.browserCaptureStartedAt,
+        browserCapturedAt: download.browserCapturedAt,
+        browserDownloadStartTime: download.browserDownloadStartTime,
+        browserDownloadEndTime: download.browserDownloadEndTime,
+      });
+      return;
+    }
+    const encoded = artifact.buffer.toString('base64');
     await this.#result(envelope, 'artifact.data.done', {
       type: 'artifact.data.done',
       artifactId: artifact.id,
       name: artifact.fileName || artifact.name,
       mime: artifact.mime,
       size: artifact.buffer.length,
-      encodedSize: artifact.buffer.toString('base64').length,
-      contentBase64: artifact.buffer.toString('base64'),
-      captureSource: 'mock-state-machine',
+      encodedSize: encoded.length,
+      contentBase64: encoded,
+      captureSource,
     });
   }
 
@@ -657,7 +683,7 @@ export class MockExtensionTab extends EventEmitter {
       title: 'ChatGPT',
       conversationId: this.state.conversationId,
       visibility: this.active ? 'visible' : 'hidden',
-      focused: this.active,
+      focused: this.active && this.focused,
       document: { state: 'ready', readyState: 'complete', pageReady: true, chatMainReady: true },
       composer: { state: 'ready', ready: true, sendVisible: this.state.generating && this.state.steerReady, attachments: this.state.attachments.map((item) => ({ ...item })) },
       activeRequest: active,
@@ -718,13 +744,81 @@ export class MockExtensionTab extends EventEmitter {
 }
 
 export class MockChatGptBrowser extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', pageOrigin = '' } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', pageOrigin = '', windowFocused = false } = {}) {
     super();
     this.bridgeUrl = String(bridgeUrl || '').replace(/\/$/, '');
     this.bridgeToken = String(bridgeToken || '');
     this.pageOrigin = String(pageOrigin || '').replace(/\/$/, '');
+    this.windowFocused = windowFocused === true;
     this.tabs = new Map();
     this.nextTabId = 100;
+    this.nextDownloadId = 1;
+    this.downloadRoot = path.join(os.tmpdir(), 'chatgpt-bridge-mock-downloads');
+    this.ownedDownloadRecords = [];
+  }
+
+  async createBrowserDownload(artifact = {}) {
+    await fsp.mkdir(this.downloadRoot, { recursive: true });
+    const requestedName = path.basename(String(artifact.fileName || artifact.name || `artifact-${randomUUID()}`));
+    const ext = path.extname(requestedName);
+    const stem = requestedName.slice(0, requestedName.length - ext.length) || 'artifact';
+    let actualName = requestedName;
+    let filePath = path.join(this.downloadRoot, actualName);
+    for (let index = 1; ; index += 1) {
+      try {
+        await fsp.lstat(filePath);
+        actualName = `${stem} (${index})${ext}`;
+        filePath = path.join(this.downloadRoot, actualName);
+      } catch (error) {
+        if (error?.code === 'ENOENT') break;
+        throw error;
+      }
+    }
+    const browserCaptureStartedAt = Date.now();
+    const browserDownloadStartTime = new Date(browserCaptureStartedAt).toISOString();
+    await fsp.writeFile(filePath, artifact.buffer);
+    const stat = await fsp.lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Mock browser download did not create a regular file: ${filePath}`);
+    const browserCapturedAt = Date.now();
+    const downloadId = this.nextDownloadId++;
+    const resolved = {
+      path: filePath,
+      statIdentity: {
+        dev: Number(stat.dev) || 0,
+        ino: Number(stat.ino) || 0,
+        size: Number(stat.size) || 0,
+        birthtimeMs: Number(stat.birthtimeMs) || 0,
+        ctimeMs: Number(stat.ctimeMs) || 0,
+        mtimeMs: Number(stat.mtimeMs) || 0,
+      },
+      captureIdentity: {
+        captureSource: 'chrome-downloads',
+        downloadId,
+        browserCaptureStartedAt,
+        browserCapturedAt,
+        browserActualName: actualName,
+      },
+    };
+    this.ownedDownloadRecords.push(resolved);
+    return {
+      name: actualName,
+      filePath,
+      size: stat.size,
+      downloadId,
+      browserCaptureStartedAt,
+      browserCapturedAt,
+      browserDownloadStartTime,
+      browserDownloadEndTime: new Date(browserCapturedAt).toISOString(),
+    };
+  }
+
+  async cleanupOwnedDownloads() {
+    const results = [];
+    for (const resolved of this.ownedDownloadRecords) {
+      results.push(await removeCapturedBrowserDownload(resolved));
+    }
+    this.ownedDownloadRecords = [];
+    return results;
   }
 
   async openTab({ launchToken = '', requestedUrl = 'https://chatgpt.com/', tabId = null, active = true } = {}) {
@@ -735,7 +829,10 @@ export class MockChatGptBrowser extends EventEmitter {
       if (requestedSessionId) state.selectSession(requestedSessionId);
     } catch {}
     if (active !== false) {
-      for (const existing of this.tabs.values()) existing.active = false;
+      for (const existing of this.tabs.values()) {
+        existing.active = false;
+        existing.focused = false;
+      }
     }
     const tab = new MockExtensionTab({
       bridgeUrl: this.bridgeUrl,
@@ -746,6 +843,7 @@ export class MockChatGptBrowser extends EventEmitter {
       launchToken,
       requestedUrl,
       active,
+      focused: active !== false && this.windowFocused,
       state,
     });
     this.tabs.set(resolvedTabId, tab);
@@ -767,5 +865,6 @@ export class MockChatGptBrowser extends EventEmitter {
   async close() {
     await Promise.allSettled(Array.from(this.tabs.values()).map((tab) => tab.close()));
     this.tabs.clear();
+    await this.cleanupOwnedDownloads();
   }
 }

@@ -64,6 +64,7 @@ test('mock ChatGPT creates separately downloadable text, JSON, and CSV artifacts
   assert.equal(output.artifacts.find((item) => item.name === 'one.txt').buffer.toString('utf8'), `${marker}_ONE\n`);
   assert.deepEqual(JSON.parse(output.artifacts.find((item) => item.name === 'two.json').buffer.toString('utf8')), { marker: `${marker}_TWO` });
   assert.equal(output.artifacts.find((item) => item.name === 'three.csv').buffer.toString('utf8').trim(), `key,value\nmarker,${marker}_THREE`);
+  assert.deepEqual(output.artifacts.map((item) => item.materializationSource), ['page-url', 'chrome-downloads', 'chrome-downloads']);
 });
 
 test('mock ChatGPT creates a deterministic ZIP with exact nested entries', async () => {

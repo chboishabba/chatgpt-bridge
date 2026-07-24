@@ -30,3 +30,24 @@ test('mock extension hello identity is read from the bundled extension files', a
     extensionBundleId: bundled.bundleId,
   });
 });
+
+test('mock browser download path creates regular files and cleanup removes them one at a time without deleting the directory', async (t) => {
+  const [{ MockChatGptBrowser }, fs, os, path] = await Promise.all([
+    import('../scripts/e2e/mock-chatgpt/extension-client.js'),
+    import('node:fs/promises'),
+    import('node:os'),
+    import('node:path'),
+  ]);
+  const browser = new MockChatGptBrowser({ bridgeUrl: 'http://127.0.0.1:1' });
+  browser.downloadRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bridge-mock-browser-downloads-'));
+  t.after(() => fs.rm(browser.downloadRoot, { recursive: true, force: true }));
+  const first = await browser.createBrowserDownload({ name: 'one.json', fileName: 'one.json', buffer: Buffer.from('{"one":1}') });
+  const second = await browser.createBrowserDownload({ name: 'two.csv', fileName: 'two.csv', buffer: Buffer.from('two,2\n') });
+  assert.equal((await fs.lstat(first.filePath)).isFile(), true);
+  assert.equal((await fs.lstat(second.filePath)).isFile(), true);
+  const results = await browser.cleanupOwnedDownloads();
+  assert.deepEqual(results.map((item) => item.removed), [true, true]);
+  await assert.rejects(fs.lstat(first.filePath), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(second.filePath), { code: 'ENOENT' });
+  assert.equal((await fs.lstat(browser.downloadRoot)).isDirectory(), true);
+});

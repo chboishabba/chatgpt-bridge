@@ -1,0 +1,39 @@
+{
+  "sourceRun": "last-real-e2e(45)",
+  "scenario": "multiple-files",
+  "tab": {
+    "visibility": "visible",
+    "focused": false
+  },
+  "terminalOutput": {
+    "answer": "",
+    "progressKinds": ["tool_status"],
+    "progressStates": ["completed"],
+    "artifactCount": 3
+  },
+  "artifacts": [
+    {
+      "extension": ".txt",
+      "materializationSource": "page-url",
+      "cleanupRequired": false,
+      "cleanupStatus": "not_applicable"
+    },
+    {
+      "extension": ".json",
+      "materializationSource": "chrome-downloads",
+      "cleanupRequired": true,
+      "cleanupStatus": "removed"
+    },
+    {
+      "extension": ".csv",
+      "materializationSource": "chrome-downloads",
+      "cleanupRequired": true,
+      "cleanupStatus": "removed"
+    }
+  ],
+  "cleanupSafety": {
+    "deleteOperation": "unlink",
+    "sequential": true,
+    "directoriesMayBeDeleted": false
+  }
+}

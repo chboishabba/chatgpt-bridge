@@ -271,7 +271,17 @@ export class BridgeOperations {
     const cleanup = await removeCapturedBrowserDownload(resolvedDownload).catch((error) => ({ removed: false, reason: error.message || String(error), path: resolvedFilePath }));
     this.#eventBus?.emitUser({
       type: cleanup.removed ? 'artifact.download.source_removed' : 'artifact.download.source_cleanup_skipped',
-      data: { artifactId, fileId: stored.id, path: cleanup.path || resolvedFilePath, reason: cleanup.reason || '', downloadId: response.downloadId ?? null, sourceClientId },
+      data: {
+        artifactId,
+        fileId: stored.id,
+        name: resolvedName,
+        path: cleanup.path || resolvedFilePath,
+        reason: cleanup.reason || '',
+        downloadId: response.downloadId ?? null,
+        sourceClientId,
+        capturedStatIdentity: resolvedDownload.statIdentity,
+        captureIdentity: resolvedDownload.captureIdentity,
+      },
     });
     this.#rememberStoredArtifact(artifactId, artifact, stored.id);
     this.#eventBus?.emitUser({ type: 'artifact.download.done', data: { artifactId, fileId: stored.id, name: stored.name, size: stored.size, source: response.captureSource || 'chrome-downloads', sourceClientId, requestId: artifact.requestId || '' } });

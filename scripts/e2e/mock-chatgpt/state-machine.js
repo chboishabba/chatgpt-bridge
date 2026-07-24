@@ -59,6 +59,7 @@ function artifact(id, name, mime, buffer, options = {}) {
     phase: 'READY',
     downloadable: true,
     downloadActionPresent: true,
+    materializationSource: options.materializationSource || 'page-url',
     buffer: Buffer.from(buffer),
     ...options,
   };
@@ -69,6 +70,19 @@ function workflowArtifact(id, name, buffer) {
     genericDownloadAction: true,
     actionLabel: 'Download the complete project ZIP',
   });
+}
+
+function completedArtifactToolStatus(label = 'Created downloadable files') {
+  return [{
+    id: `tool-status-${randomUUID()}`,
+    logicalId: 'artifact-tool-status',
+    kind: 'tool_status',
+    text: String(label),
+    state: 'completed',
+    active: false,
+    visible: true,
+    revision: 1,
+  }];
 }
 
 async function responseForPrompt(prompt, context = {}) {
@@ -99,11 +113,12 @@ async function responseForPrompt(prompt, context = {}) {
     const names = [...source.matchAll(/([\w.-]+\.(?:txt|json|csv))/g)].map((match) => match[1]).slice(0, 3);
     const markers = requestedArtifactMarkers(source);
     return {
-      answer: 'Created three downloadable files.',
+      answer: '',
+      progressItems: completedArtifactToolStatus('Created three downloadable files'),
       artifacts: [
-        artifact(randomUUID(), names[0] || 'one.txt', 'text/plain', `${markers.text}\n`),
-        artifact(randomUUID(), names[1] || 'two.json', 'application/json', `${JSON.stringify({ marker: markers.json })}\n`),
-        artifact(randomUUID(), names[2] || 'three.csv', 'text/csv', `key,value\nmarker,${markers.csv}\n`),
+        artifact(randomUUID(), names[0] || 'one.txt', 'text/plain', `${markers.text}\n`, { materializationSource: 'page-url' }),
+        artifact(randomUUID(), names[1] || 'two.json', 'application/json', `${JSON.stringify({ marker: markers.json })}\n`, { materializationSource: 'chrome-downloads' }),
+        artifact(randomUUID(), names[2] || 'three.csv', 'text/csv', `key,value\nmarker,${markers.csv}\n`, { materializationSource: 'chrome-downloads' }),
       ],
     };
   }
@@ -113,7 +128,11 @@ async function responseForPrompt(prompt, context = {}) {
     const alpha = source.match(/alpha\.txt with content\s+([^\s]+)/i)?.[1] || 'ALPHA';
     const beta = source.match(/nested\/beta\.txt with content\s+([^\s.]+)/i)?.[1] || 'BETA';
     const buffer = await zipBuffer([{ name: 'alpha.txt', data: alpha }, { name: 'nested/beta.txt', data: beta }]);
-    return { answer: 'Created the requested ZIP archive.', artifacts: [artifact(randomUUID(), name, 'application/zip', buffer)] };
+    return {
+      answer: '',
+      progressItems: completedArtifactToolStatus('Created the requested ZIP archive'),
+      artifacts: [artifact(randomUUID(), name, 'application/zip', buffer)],
+    };
   }
 
   if (/VALIDATION_OUTPUT_BEGIN/i.test(source) && /return a new downloadable ZIP/i.test(source)) {
@@ -421,6 +440,7 @@ export class MockChatGptStateMachine {
 
     if (!isCurrentGeneration()) return turn;
     turn.text = plan.answer;
+    turn.progressItems = Array.isArray(plan.progressItems) ? plan.progressItems.map((item) => ({ ...item })) : turn.progressItems;
     turn.artifacts = plan.artifacts || [];
     turn.final = true;
     if (plan.projectResult) this.lastProjectResult = plan.projectResult;

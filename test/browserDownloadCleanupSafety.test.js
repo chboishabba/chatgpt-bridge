@@ -137,3 +137,32 @@ test('resolver rejects symbolic links even when their target looks like a fresh 
   );
   assert.equal(await fs.readFile(target, 'utf8'), 'not a test download');
 });
+
+test('cleanup never unlinks directories and reports the exact path as untouched', async (t) => {
+  const root = await makeTempDir();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directoryPath = path.join(root, 'project.zip');
+  await fs.mkdir(directoryPath);
+  const now = Date.now();
+  const cleanup = await removeCapturedBrowserDownload({
+    path: directoryPath,
+    statIdentity: {
+      dev: 1,
+      ino: 1,
+      size: 0,
+      birthtimeMs: now,
+      ctimeMs: now,
+      mtimeMs: now,
+    },
+    captureIdentity: {
+      captureSource: 'chrome-downloads',
+      downloadId: 99,
+      browserCaptureStartedAt: now - 100,
+      browserCapturedAt: now,
+      browserActualName: 'project.zip',
+    },
+  });
+  assert.equal(cleanup.removed, false);
+  assert.equal(cleanup.reason, 'not_regular_file');
+  assert.equal((await fs.lstat(directoryPath)).isDirectory(), true);
+});

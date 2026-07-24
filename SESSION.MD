@@ -2,7 +2,7 @@
 
 ## Current release
 
-- Bridge package: `6.3.8`.
+- Bridge package: `6.3.9`.
 - Extension manifest: `2.3.8`.
 - Content runtime: `4.3.7`.
 - Extension protocol: `5` only.
@@ -10,6 +10,13 @@
 - Workflow runtime schema: `3` only.
 - Interactive dependency: exact `terlio.js@1.1.0`.
 - `package-lock.json` references public npm registry URLs only.
+
+## 6.3.9 live/mock artifact parity
+
+- `last-real-e2e(45)` passed all 15 scenarios. Its multiple-file response used one `page-url` artifact and two `chrome-downloads` artifacts, had no ordinary answer text, exposed one completed tool-status item, and ran in a visible but unfocused tab.
+- The mock now reproduces that terminal shape and creates real temporary regular files for Chrome-backed captures. Production import removes each exact source independently; the mock download directory remains present and empty.
+- The E2E finalizer retries only exact owned files with complete unchanged capture/stat identity. Cleanup is a sequential `unlink` loop; it never deletes a directory, never uses recursive removal, and never expands a filename pattern.
+- Captured parity is stored in `test/fixtures/e2e-real/artifact-materialization-e2e45.json` and enforced by `test/mockArtifactMaterializationParity.test.js`.
 
 ## Canonical architecture
 

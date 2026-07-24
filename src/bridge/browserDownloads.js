@@ -1,13 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-async function statFile(filePath) {
+async function lstatEntry(filePath) {
   try {
-    const stat = await fs.lstat(filePath);
-    return stat?.isFile() && !stat.isSymbolicLink() ? stat : null;
-  } catch {
-    return null;
+    return await fs.lstat(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
   }
+}
+
+async function statFile(filePath) {
+  const stat = await lstatEntry(filePath);
+  return stat?.isFile() && !stat.isSymbolicLink() ? stat : null;
 }
 
 function downloadConflictCandidates(filePath = '', preferredName = '') {
@@ -173,12 +178,16 @@ export async function removeCapturedBrowserDownload(resolved = {}) {
   if (normalizeConflictDownloadName(path.basename(absolute)) !== normalizeConflictDownloadName(capture.browserActualName)) {
     return { removed: false, reason: 'captured_name_changed', path: absolute };
   }
-  const current = await statFile(absolute);
+  const current = await lstatEntry(absolute);
   if (!current) return { removed: true, reason: 'already_missing', path: absolute };
+  if (current.isSymbolicLink()) return { removed: false, reason: 'symbolic_link', path: absolute };
+  if (!current.isFile()) return { removed: false, reason: 'not_regular_file', path: absolute };
   if (!sameStatIdentity(resolved.statIdentity, statIdentity(current))) {
     return { removed: false, reason: 'identity_changed_after_import', path: absolute };
   }
   await fs.unlink(absolute);
+  const after = await lstatEntry(absolute);
+  if (after) return { removed: false, reason: 'source_still_exists_after_unlink', path: absolute };
   return { removed: true, reason: 'captured_source_deleted', path: absolute };
 }
 

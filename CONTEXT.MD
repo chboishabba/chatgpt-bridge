@@ -6,7 +6,7 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.8`;
+- bridge package: `6.3.9`;
 - extension: `2.3.8`;
 - content runtime: `4.3.7`;
 - extension protocol: `5` only;
@@ -14,6 +14,12 @@ Current release contract:
 - WebSocket endpoint: `/extension/ws`.
 
 No polling, page-context WebSocket, userscript transport, protocol downgrade, alternate request lifecycle, job API, or alternate interactive runtime remains.
+
+## 6.3.9 E2E artifact parity and exact source cleanup
+
+- Real E2E 45 proved that one response can mix page-URL materialization with physical Chrome downloads. The deterministic mock now creates the same mix and sends Chrome-backed artifacts through the production import and cleanup path.
+- Artifact-only terminal turns are represented with an empty ordinary answer, a completed `tool_status`, and READY artifacts. A visible active tab may remain unfocused, matching a real browser window that is not frontmost.
+- E2E shutdown cleanup is fail-closed and sequential. It considers one exact captured absolute path at a time, verifies the original Chrome and stat identities, and calls only `unlink`. Directories, symbolic links, non-regular entries, changed paths, and broad filename matches are always left untouched. The containing download directory is never removed.
 
 ## Composition
 
