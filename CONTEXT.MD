@@ -6,9 +6,9 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.6`;
-- extension: `2.3.7`;
-- content runtime: `4.3.6`;
+- bridge package: `6.3.7`;
+- extension: `2.3.8`;
+- content runtime: `4.3.7`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - WebSocket endpoint: `/extension/ws`.
@@ -103,7 +103,7 @@ A browser tab has one primary bridge owner. Independent workflow workers use `Re
 
 `/workflow` is the single interactive entry point. It exposes three presets over one shared runner: Apply changes from ChatGPT, Fix the project until checks pass, and Work through a task. No background behavior starts from ordinary interactive mode. Wizard multi-selects accept the terminal's printable Space event, Esc or Alt+Left returns to the previous step without resetting the draft, and setup failures remain open with retry/edit actions. The bare command is the only initial `/workflow` completion and opens the wizard; `/workflow wizard` is an alias, while `/workflow ` exposes optional targeted views.
 
-Internally, one workflow v3 reducer owns lifecycle, active-run phase, the sole `nextAction` decision contract, effect references, retries, outcomes, canonical session/source binding, and workflow-owned Git aggregation required to resume checkpoint/squash policy after restart. Passive observation is a persisted subscription plus binding epoch, not an independent watcher state. Inputs arriving during hydration are durably staged in the workflow store and are removed only after canonical enqueue/processing succeeds; stale configured or runtime binding mirrors cannot override restored `workflowState.binding`. `RuntimeCoordinator` serializes reducer/effect commits, `WorkflowResponseProcessor` owns response/package/verification/application flow, and `AutomationRunExecutor` performs advanced preset check/repair cycles without owning start, pause, resume, stop, recovery, or terminal state. Shared services own configuration, attention notifications, chat bootstrap and recovery, effective-project fingerprints, result validation and repair, safe application, checks, and workflow-owned Git commits. Interactive startup prefers an explicit project, then the selected persisted workflow root, then the launch directory; it immediately offers the persisted workflow for continuation instead of reopening a stale temporary directory. Retryable artifact-materialization failures remain typed effects and return the canonical workflow to `ready` or `waiting_action` according to reducer policy.
+Internally, one workflow v3 reducer owns lifecycle, active-run phase, the sole `nextAction` decision contract, effect references, retries, outcomes, canonical session/source binding, and workflow-owned Git aggregation required to resume checkpoint/squash policy after restart. Passive observation is a persisted subscription plus binding epoch, not an independent watcher state. Inputs arriving during hydration are durably staged in the workflow store and are removed only after canonical enqueue/processing succeeds; stale configured or runtime binding mirrors cannot override restored `workflowState.binding`. `RuntimeCoordinator` serializes reducer/effect commits, `WorkflowResponseProcessor` owns response/package/verification/application flow, and `AutomationRunExecutor` performs advanced preset check/repair cycles without owning start, pause, resume, stop, recovery, or terminal state. Shared services own configuration, attention notifications, chat bootstrap and recovery, effective-project fingerprints, result validation and repair, safe application, checks, and workflow-owned Git commits. Interactive startup prefers an explicit project, then the selected persisted workflow root, then the launch directory; it immediately offers the persisted workflow for continuation instead of reopening a stale temporary directory. Retryable artifact-materialization failures remain typed effects and return the canonical workflow to `ready` or `waiting_action` according to reducer policy. An exhausted action-readiness wait is already internally retried with bounded DOM backoff, so it enters one explicit recovery action without a duplicate automatic workflow attempt; E2E treats that action as terminal for unattended runs.
 
 ## Interactive runtime
 

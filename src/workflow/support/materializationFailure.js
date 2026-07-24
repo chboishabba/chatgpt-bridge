@@ -10,6 +10,7 @@ const RETRYABLE_PATTERNS = [
   /artifact preview was not ready/i,
   /exact artifact action did not become ready/i,
   /exact filename-bound artifact action is not currently usable/i,
+  /exact artifact action identity is not currently usable/i,
   /timed out waiting for page generation/i,
 ];
 

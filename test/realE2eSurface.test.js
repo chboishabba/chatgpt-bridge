@@ -557,7 +557,7 @@ test('real E2E runner covers reasoning, steer, files, ZIP, project context, reus
   assert.match(source, /No terminal result yet; continuing to monitor the pipeline/);
   assert.match(source, /Looking for .* in the scoped assistant result/);
   assert.match(source, /Artifact candidates returned by the completed prompt/);
-  assert.match(source, /Downloading the selected artifact/);
+  assert.match(source, /Preparing the selected artifact for download/);
   assert.match(source, /FAST_EFFORT = 'instant'/);
   assert.match(source, /reasoningTestPrompt/);
   assert.match(source, /TEST_\$\{testId\}_BEGIN/);

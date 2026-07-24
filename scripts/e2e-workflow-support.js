@@ -25,6 +25,23 @@ const GLOBAL_FATAL_WORKFLOW_EVENTS = new Set([
   'workflow.unloaded',
 ]);
 
+function workflowActionRequiredEvent(workflow = null) {
+  if (!workflow || workflow.lifecycle !== 'waiting_action' || !workflow.nextAction) return null;
+  const action = workflow.nextAction;
+  return {
+    type: 'workflow.action.required',
+    data: {
+      actionId: action.id || '',
+      kind: action.kind || '',
+      lifecycle: workflow.lifecycle || '',
+      phase: workflow.phase || '',
+      reason: action.reason || action.message || '',
+      message: action.message || action.reason || 'Workflow requires an explicit recovery action',
+      workflowStateRevision: Number(workflow.workflowStateRevision || 0),
+    },
+  };
+}
+
 function workflowStateFatalEvent(workflow = null, successOutcomeStatuses = [], unseenEvents = []) {
   if (!workflow) return null;
   const outcome = workflow.lastOutcome || null;
@@ -69,7 +86,9 @@ export function findWorkflowWaitOutcome(events = [], {
     GLOBAL_FATAL_WORKFLOW_EVENTS.has(event?.type)
     || (typeof fatalPredicate === 'function' && fatalPredicate(event, values))
   )) || null;
-  const fatal = fatalEvent || workflowStateFatalEvent(workflow, successOutcomeStatuses, candidates);
+  const fatal = fatalEvent
+    || workflowStateFatalEvent(workflow, successOutcomeStatuses, candidates)
+    || workflowActionRequiredEvent(workflow);
   return { matched: null, fatal };
 }
 

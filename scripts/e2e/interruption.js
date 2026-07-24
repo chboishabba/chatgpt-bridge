@@ -83,52 +83,64 @@ export function createE2eSignalCoordinator({
 export async function terminateOwnedChild(child, {
   signal = 'SIGTERM',
   timeoutMs = 5_000,
+  forceTimeoutMs = 2_000,
 } = {}) {
-  if (!child) return Object.freeze({ exited: true, alreadyExited: true, code: null, signal: null });
-  if (child.exitCode != null || child.signalCode) {
+  if (!child) return Object.freeze({ exited: true, alreadyExited: true, forced: false, code: null, signal: null });
+  if (child.exitCode != null) {
     return Object.freeze({
       exited: true,
       alreadyExited: true,
-      code: child.exitCode ?? null,
+      forced: false,
+      code: child.exitCode,
       signal: child.signalCode || null,
     });
   }
 
-  let timer = null;
-  let onExit = null;
-  const exitPromise = new Promise((resolve) => {
-    onExit = (code, childSignal) => resolve(Object.freeze({
+  const signalAndWait = (childSignal, limitMs) => new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      child.off?.('exit', onExit);
+      resolve(Object.freeze(result));
+    };
+    const onExit = (code, observedSignal) => finish({
       exited: true,
       alreadyExited: false,
       code: code ?? null,
-      signal: childSignal || null,
-    }));
+      signal: observedSignal || child.signalCode || childSignal || null,
+    });
     child.once('exit', onExit);
-  });
-  const timeoutPromise = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(Object.freeze({
+    timer = setTimeout(() => finish({
       exited: false,
       alreadyExited: false,
       code: child.exitCode ?? null,
-      signal: child.signalCode || null,
-    })), Math.max(0, Number(timeoutMs) || 0));
+      signal: null,
+    }), Math.max(0, Number(limitMs) || 0));
+
+    let sent = false;
+    try { sent = child.kill(childSignal) !== false; } catch {}
+    if (child.exitCode != null) {
+      finish({ exited: true, alreadyExited: false, code: child.exitCode, signal: child.signalCode || childSignal || null });
+      return;
+    }
+    // kill() returns false when the process is already gone. In that narrow
+    // case signalCode is historical evidence rather than merely a sent signal.
+    if (!sent && child.signalCode) {
+      finish({ exited: true, alreadyExited: true, code: null, signal: child.signalCode });
+    }
   });
 
-  try {
-    child.kill(signal);
-    if (child.exitCode != null || child.signalCode) {
-      return Object.freeze({
-        exited: true,
-        alreadyExited: false,
-        code: child.exitCode ?? null,
-        signal: child.signalCode || null,
-      });
-    }
-    return await Promise.race([exitPromise, timeoutPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    if (onExit) child.off?.('exit', onExit);
-  }
+  const graceful = await signalAndWait(signal, timeoutMs);
+  if (graceful.exited || signal === 'SIGKILL') return Object.freeze({ ...graceful, forced: signal === 'SIGKILL' });
+
+  // A child may log graceful shutdown yet keep sockets or background handles
+  // alive. Force it after the bounded grace period so a completed E2E run can
+  // always return a process exit status.
+  const forced = await signalAndWait('SIGKILL', forceTimeoutMs);
+  return Object.freeze({ ...forced, forced: true });
 }
 
 export function ownedBridgeSpawnOptions(options = {}, platform = process.platform) {

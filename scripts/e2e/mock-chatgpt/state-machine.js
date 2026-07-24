@@ -48,8 +48,27 @@ async function zipBuffer(entries = []) {
   }
 }
 
-function artifact(id, name, mime, buffer) {
-  return { id, candidateId: id, kind: mime === 'application/zip' ? 'archive' : 'file', name, mime, phase: 'READY', downloadable: true, downloadActionPresent: true, buffer: Buffer.from(buffer) };
+function artifact(id, name, mime, buffer, options = {}) {
+  return {
+    id,
+    candidateId: id,
+    kind: mime === 'application/zip' ? 'archive' : 'file',
+    name,
+    fileName: name,
+    mime,
+    phase: 'READY',
+    downloadable: true,
+    downloadActionPresent: true,
+    buffer: Buffer.from(buffer),
+    ...options,
+  };
+}
+
+function workflowArtifact(id, name, buffer) {
+  return artifact(id, name, 'application/zip', buffer, {
+    genericDownloadAction: true,
+    actionLabel: 'Download the complete project ZIP',
+  });
 }
 
 async function responseForPrompt(prompt, context = {}) {
@@ -115,7 +134,7 @@ async function responseForPrompt(prompt, context = {}) {
     const buffer = await zipBuffer(entries);
     return {
       answer: 'Created the corrected complete project ZIP.',
-      artifacts: [artifact(randomUUID(), `${packageName}.zip`, 'application/zip', buffer)],
+      artifacts: [workflowArtifact(randomUUID(), `${packageName}.zip`, buffer)],
       workflowContext: { projectId, packageName, marker, sourceLine },
     };
   }
@@ -134,7 +153,7 @@ async function responseForPrompt(prompt, context = {}) {
     const buffer = await zipBuffer(entries);
     return {
       answer: 'Created the complete project ZIP.',
-      artifacts: [artifact(randomUUID(), `${packageName}.zip`, 'application/zip', buffer)],
+      artifacts: [workflowArtifact(randomUUID(), `${packageName}.zip`, buffer)],
       workflowContext: { projectId, packageName, marker, sourceLine },
     };
   }

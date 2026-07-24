@@ -28,11 +28,16 @@ function renderArtifact(artifact = {}) {
   const phase = String(artifact.phase || 'READY');
   const pending = /PEND|GENERAT|LOAD|RUN/i.test(phase);
   const id = escapeHtml(artifact.id);
+  const actionLabel = artifact.actionLabel || 'Download';
+  const displayName = artifact.genericDownloadAction ? actionLabel : artifact.name;
+  const downloadAction = artifact.genericDownloadAction
+    ? `<a role="button" data-testid="artifact-download-button" href="${escapeHtml(artifact.url || `/artifacts/${encodeURIComponent(artifact.id || '')}`)}">${escapeHtml(actionLabel)}</a>`
+    : `<a role="button" data-testid="artifact-download-button" href="${escapeHtml(artifact.url || `/artifacts/${encodeURIComponent(artifact.id || '')}`)}" download="${escapeHtml(artifact.name)}">Download</a>`;
   return `<div class="artifact-card" data-testid="artifact-card-${id}" data-artifact-id="${id}" data-state="${escapeHtml(phase)}">
     <div class="artifact-icon">${artifact.mime === 'application/zip' ? 'ZIP' : 'FILE'}</div>
-    <div class="artifact-copy"><strong>${escapeHtml(artifact.name)}</strong><span>${pending ? 'Generating…' : escapeHtml(artifact.mime || 'application/octet-stream')}</span></div>
+    <div class="artifact-copy"><strong>${escapeHtml(displayName)}</strong><span>${pending ? 'Generating…' : escapeHtml(artifact.mime || 'application/octet-stream')}</span></div>
     <button type="button" data-testid="artifact-preview-button" data-preview-artifact-id="${id}">Preview</button>
-    <a role="button" data-testid="artifact-download-button" href="${escapeHtml(artifact.url || `/artifacts/${encodeURIComponent(artifact.id || '')}`)}" download="${escapeHtml(artifact.name)}">Download</a>
+    ${downloadAction}
   </div>`;
 }
 

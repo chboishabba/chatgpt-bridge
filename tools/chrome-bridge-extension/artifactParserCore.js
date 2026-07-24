@@ -291,7 +291,10 @@
   function scoreArtifactActionCandidate(artifact = {}, candidate = {}) {
     const desiredName = normalizeComparable(artifact.name || artifact.fileName || '');
     const candidateName = normalizeComparable(candidate.name || candidate.fileName || '');
+    const desiredActionLabel = normalizeComparable(artifact.actionLabel || artifact.text || artifact.name || '');
+    const candidateActionLabel = normalizeComparable(candidate.actionLabel || candidate.text || '');
     const exactName = Boolean(desiredName && candidateName && desiredName === candidateName);
+    const exactActionLabel = Boolean(desiredActionLabel && candidateActionLabel && desiredActionLabel === candidateActionLabel);
 
     const exactBlockRange = Boolean(
       artifact.blockStart
@@ -327,11 +330,12 @@
     // shared by every generated-file button in the same assistant turn.
     const locatorIdentity = (exactBlockRange || exactBlockTestId)
       && (exactOrdinal || exactActionTestId || exactActionAriaLabel);
-    const actionIdentityWithoutName = !desiredName && (locatorIdentity || exactActionTestId || exactActionAriaLabel);
-    const eligible = exactName || locatorIdentity || actionIdentityWithoutName;
+    const actionIdentityWithoutName = !desiredName && (locatorIdentity || exactActionTestId || exactActionAriaLabel || exactActionLabel);
+    const eligible = exactName || exactActionLabel || locatorIdentity || actionIdentityWithoutName;
 
     let score = 0;
     if (exactName) score += 240;
+    if (exactActionLabel) score += 180;
     if (exactBlockRange) score += 120;
     if (exactBlockTestId) score += 90;
     if (exactActionTestId) score += 80;
@@ -344,9 +348,12 @@
       eligible,
       score: eligible ? score : -Infinity,
       exactName,
+      exactActionLabel,
       locatorIdentity,
       desiredName,
       candidateName,
+      desiredActionLabel,
+      candidateActionLabel,
     };
   }
 
@@ -379,8 +386,10 @@
       index: ranked[0].index,
       score: ranked[0].match.score,
       exactName: ranked[0].match.exactName,
+      exactActionLabel: ranked[0].match.exactActionLabel,
       locatorIdentity: ranked[0].match.locatorIdentity,
       candidateName: ranked[0].match.candidateName,
+      candidateActionLabel: ranked[0].match.candidateActionLabel,
     };
   }
 

@@ -81,7 +81,7 @@
         await streamArtifactData(commandId, artifact, initialUrl, signal);
       } catch (err) {
         diagnostic('artifact.fetch.failed', { artifactId: artifact.id || '', name: artifact.name || '', message: err.message || String(err) });
-        send({ type: 'command.error', commandId, message: err.message || String(err) });
+        send({ type: 'command.error', commandId, code: err.code || 'ARTIFACT_MATERIALIZATION_FAILED', message: err.message || String(err) });
       }
     }
   
@@ -153,39 +153,9 @@
       const previewState = { preview: null };
   
       let pageCapture = null;
-      try {
-        pageCapture = await armPageArtifactCapture(artifact, timeoutMs);
-        diagnostic('artifact.page_capture.armed', { artifactId: artifact.id, captureId: pageCapture.captureId, timeoutMs });
-      } catch (err) {
-        diagnostic('artifact.page_capture.unavailable', { artifactId: artifact.id, message: err.message || String(err) });
-      }
-  
       let browserCapture = null;
       let browserDownloadPromise = null;
       let browserCaptureReleased = false;
-      if (getExtensionPort()) {
-        try {
-          browserCapture = await extensionRequest('bridge.download.capture.begin', {
-            timeoutMs,
-            expectedName: artifact.name || artifact.fileName || '',
-            effectId: String(effect.effectId || ''),
-            commandId: String(effect.commandId || ''),
-            artifactCandidateId: String(artifact.id || ''),
-            artifactRequirementId: String(artifact.requirementId || ''),
-            artifact: {
-              id: artifact.id,
-              name: artifact.name,
-              kind: artifact.kind,
-              text: artifact.text,
-              actionLabel: artifact.actionLabel,
-              sourceTurnKey: artifact.sourceTurnKey || '',
-            },
-          }, 5_000);
-          diagnostic('artifact.download_capture.armed', { artifactId: artifact.id, captureId: browserCapture.captureId, timeoutMs });
-        } catch (err) {
-          diagnostic('artifact.download_capture.unavailable', { artifactId: artifact.id, message: err.message || String(err) });
-        }
-      }
   
       let rejectFatal = null;
       const materializationControl = {
@@ -236,8 +206,15 @@
       };
   
       try {
-        const actionWaitMs = Math.min(8_000, Math.max(3_000, Math.floor(timeoutMs * 0.18)));
+        const actionWaitMs = Math.min(20_000, Math.max(8_000, Math.floor(timeoutMs * 0.45)));
         const actionStartedAt = Date.now();
+        diagnostic('artifact.action.wait.started', {
+          artifactId: artifact.id || '',
+          expectedName: artifact.name || artifact.fileName || '',
+          expectedActionLabel: artifact.actionLabel || artifact.text || '',
+          sourceTurnKey: artifact.sourceTurnKey || '',
+          timeoutMs: actionWaitMs,
+        });
         let backoffMs = 100;
         let lastError = null;
         let resolvedAction = null;
@@ -247,7 +224,7 @@
           try {
             resolvedAction = findArtifactActionButton(artifact, { withResolution: true });
             if (resolvedAction && isUsableButton(resolvedAction.element)) break;
-            lastError = new Error('exact filename-bound artifact action is not currently usable');
+            lastError = new Error('exact artifact action identity is not currently usable');
           } catch (err) {
             lastError = err;
           }
@@ -256,7 +233,9 @@
         }
   
         if (!resolvedAction || !isUsableButton(resolvedAction.element)) {
-          throw new Error(`Exact artifact action did not become ready within ${actionWaitMs}ms for ${artifact.name || artifact.id || 'artifact'}${lastError ? `: ${lastError.message || lastError}` : ''}`);
+          const error = new Error(`Exact artifact action did not become ready within ${actionWaitMs}ms for ${artifact.name || artifact.id || 'artifact'}${lastError ? `: ${lastError.message || lastError}` : ''}`);
+          error.code = 'ARTIFACT_ACTION_NOT_READY';
+          throw error;
         }
   
         diagnostic('artifact.action.resolved', {
@@ -264,11 +243,62 @@
           expectedName: artifact.name || artifact.fileName || '',
           candidateName: resolvedAction.descriptor?.name || '',
           exactName: Boolean(resolvedAction.selection?.exactName),
+          exactActionLabel: Boolean(resolvedAction.selection?.exactActionLabel),
           locatorIdentity: Boolean(resolvedAction.selection?.locatorIdentity),
           score: resolvedAction.selection?.score || 0,
           selectorHintMatched: Boolean(resolvedAction.descriptor?.selectorMatched),
           waitedMs: Date.now() - actionStartedAt,
         });
+
+        diagnostic('artifact.action.ready', {
+          artifactId: artifact.id || '',
+          expectedName: artifact.name || artifact.fileName || '',
+          candidateName: resolvedAction.descriptor?.name || '',
+          candidateActionLabel: resolvedAction.descriptor?.actionLabel || '',
+          waitedMs: Date.now() - actionStartedAt,
+        });
+
+        // Resolve the exact action first. Capture channels are armed only after
+        // the button is proven ready, immediately before the click/navigation,
+        // so readiness and download timeouts cannot be confused.
+        try {
+          pageCapture = await armPageArtifactCapture(artifact, timeoutMs);
+          diagnostic('artifact.page_capture.armed', { artifactId: artifact.id, captureId: pageCapture.captureId, timeoutMs });
+        } catch (err) {
+          diagnostic('artifact.page_capture.unavailable', { artifactId: artifact.id, message: err.message || String(err) });
+        }
+
+        if (getExtensionPort()) {
+          try {
+            browserCapture = await extensionRequest('bridge.download.capture.begin', {
+              timeoutMs,
+              expectedName: artifact.name || artifact.fileName || '',
+              effectId: String(effect.effectId || ''),
+              commandId: String(effect.commandId || ''),
+              artifactCandidateId: String(artifact.id || ''),
+              artifactRequirementId: String(artifact.requirementId || ''),
+              artifact: {
+                id: artifact.id,
+                name: artifact.name,
+                kind: artifact.kind,
+                text: artifact.text,
+                actionLabel: artifact.actionLabel,
+                sourceTurnKey: artifact.sourceTurnKey || '',
+              },
+            }, 5_000);
+            diagnostic('artifact.download_capture.armed', { artifactId: artifact.id, captureId: browserCapture.captureId, timeoutMs });
+          } catch (err) {
+            diagnostic('artifact.download_capture.unavailable', { artifactId: artifact.id, message: err.message || String(err) });
+          }
+        }
+
+        const refreshedAction = findArtifactActionButton(artifact, { withResolution: true });
+        if (!refreshedAction || !isUsableButton(refreshedAction.element)) {
+          const error = new Error(`Exact artifact action became unavailable before download start for ${artifact.name || artifact.id || 'artifact'}`);
+          error.code = 'ARTIFACT_ACTION_NOT_READY';
+          throw error;
+        }
+        resolvedAction = refreshedAction;
 
         const attempts = [];
         if (browserCapture?.captureId) {
@@ -323,6 +353,12 @@
             sourceTurnKey: artifact.sourceTurnKey || '',
             waitedMs: Date.now() - actionStartedAt,
           });
+          diagnostic('artifact.download.started', {
+            artifactId: artifact.id || '',
+            expectedName: artifact.name || artifact.fileName || '',
+            source: 'background-url',
+            timeoutMs,
+          });
         } else {
           resolvedAction.element.click();
           diagnostic('artifact.action.clicked', {
@@ -331,6 +367,12 @@
             candidateName: resolvedAction.descriptor?.name || '',
             sourceTurnKey: artifact.sourceTurnKey || '',
             waitedMs: Date.now() - actionStartedAt,
+          });
+          diagnostic('artifact.download.started', {
+            artifactId: artifact.id || '',
+            expectedName: artifact.name || artifact.fileName || '',
+            source: 'action-click',
+            timeoutMs,
           });
         }
 
@@ -506,9 +548,18 @@
     function artifactActionCandidateDescriptor(element, artifact, root, selectorMatched = false) {
       const locator = artifactLocatorMeta(element, root);
       const href = element?.href || element?.getAttribute?.('href') || '';
+      const fileName = artifactFileName(element, root, href);
+      const actionLabel = String(
+        element?.getAttribute?.('aria-label')
+        || element?.getAttribute?.('title')
+        || element?.innerText
+        || element?.textContent
+        || '',
+      ).trim();
       return {
-        name: artifactFileName(element, root, href),
-        fileName: artifactFileName(element, root, href),
+        name: fileName,
+        fileName,
+        actionLabel,
         blockStart: locator.blockStart,
         blockEnd: locator.blockEnd,
         blockTestId: locator.blockTestId,

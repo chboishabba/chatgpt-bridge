@@ -212,7 +212,7 @@ export class WorkflowResponseProcessor {
       kind: WorkflowRunKind.MANUAL,
       phase: WorkflowPhase.DOWNLOADING,
       references: { source: context.source || '', turnKey: response.turnKey || '' },
-    }, 'workflow.artifact.download.started', { pipelineId, artifact: summarizeArtifact(artifact) });
+    }, 'workflow.artifact.materialization.started', { pipelineId, artifact: summarizeArtifact(artifact) });
     const downloadEffectId = `${pipelineId}:download:${context.localFileId || artifact.id}`;
     const fetched = await executeWorkflowEffect({
       transition: (target, type, data) => this.transition(target, type, data),

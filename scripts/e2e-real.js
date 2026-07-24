@@ -593,8 +593,8 @@ async function downloadArtifact(options, artifact) {
   assert(artifact?.id, 'Artifact has no id');
   const name = artifact.name || artifact.fileName || artifact.id;
   const started = Date.now();
-  testLog('action', 'artifact', 'Downloading the selected artifact', { artifactId: artifact.id, name, timeoutMs: options.artifactTimeoutMs });
-  testLog('wait', 'artifact', 'Waiting for artifact materialization and byte transfer', { artifactId: artifact.id, name });
+  testLog('action', 'artifact', 'Preparing the selected artifact for download', { artifactId: artifact.id, name, timeoutMs: options.artifactTimeoutMs });
+  testLog('wait', 'artifact', 'Waiting for an exact usable action, then artifact byte transfer', { artifactId: artifact.id, name });
   const bytes = await api(options, `/artifacts/${encodeURIComponent(artifact.id)}/download`, { binary: true, timeoutMs: options.artifactTimeoutMs });
   testLog('state', 'artifact', 'Artifact bytes received; validating source cleanup', { artifactId: artifact.id, name, bytes: bytes.length, elapsedMs: Date.now() - started });
   const cleanupAudit = await auditArtifactSourceCleanup(options, artifact.id);

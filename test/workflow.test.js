@@ -390,7 +390,7 @@ test('the direct correction response and watcher copy of the same turn are proce
   });
   assert.equal(await fs.readFile(path.join(project, 'src/index.js'), 'utf8'), 'corrected\n');
   assert.equal(events.filter((event) => event.type === 'workflow.apply.completed').length, 1);
-  assert.equal(events.filter((event) => event.type === 'workflow.artifact.download.started').length, 1);
+  assert.equal(events.filter((event) => event.type === 'workflow.artifact.materialization.started').length, 1);
   assert.equal(events.filter((event) => event.type === 'workflow.turn.duplicate.skipped').length, 1);
 });
 
@@ -421,6 +421,32 @@ test('passive artifact materialization exhaustion becomes one recovery action', 
   assert.equal(current.lifecycle, 'waiting_action');
   assert.equal(current.nextAction.kind, 'recovery');
   assert.equal(events.some((event) => event.type === 'workflow.failed'), false);
+});
+
+test('proved artifact action readiness failure skips duplicate workflow retry', async (t) => {
+  const root = await tempRoot();
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const project = path.join(root, 'project');
+  await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  await fs.writeFile(path.join(project, 'package.json'), JSON.stringify({ name: 'workflow-fixture', version: '1.0.0' }));
+  await fs.writeFile(path.join(project, 'src/index.js'), 'old\n');
+  const configPath = await writeConfig(path.join(root, 'workflow.json'), project);
+  const actionError = Object.assign(new Error('Exact artifact action did not become ready within 20000ms for Download the complete project ZIP'), {
+    code: 'ARTIFACT_ACTION_NOT_READY',
+  });
+  const fixture = createBridgeAndStore({}, [], { fetchErrors: { genericAction: actionError } });
+  const manager = new WorkflowManager({ bridge: fixture.bridge, fileStore: fixture.fileStore, dataDir: path.join(root, 'data') });
+  t.after(() => manager.close());
+  await manager.load(configPath);
+
+  fixture.emitObserved(observedTurn('genericAction'));
+  const current = await waitFor(async () => manager.get('fixture-workflow')?.nextAction ? manager.get('fixture-workflow') : null);
+  const events = await manager.events('fixture-workflow', 200);
+  const deferred = events.find((event) => event.type === 'workflow.artifact.materialization.deferred');
+  assert.equal(current.lifecycle, 'waiting_action');
+  assert.equal(current.nextAction.kind, 'recovery');
+  assert.equal(deferred.data.willRetry, false);
+  assert.equal(events.some((event) => event.type === 'workflow.effect.retry.planned'), false);
 });
 
 test('pending nextAction survives restart and rejection returns to ready', async (t) => {

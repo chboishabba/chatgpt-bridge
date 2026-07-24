@@ -404,7 +404,7 @@ test('extension reload waits for the server ACK of its durable command acceptanc
     reloadTabs: false,
     sourceTabId: h.state.tabId,
     commandId: 'reload-ack-command',
-    expectedVersion: '2.3.7',
+    expectedVersion: '2.3.8',
   });
 
   await new Promise((resolve) => setTimeout(resolve, 80));
@@ -486,7 +486,7 @@ test('extension reload stages a localhost trampoline before restarting the runti
     sourceLaunchToken: 'bridge-real-e2e-trampoline',
     temporaryServerUrl: 'http://127.0.0.1:18181',
     commandId: 'reload-trampoline-command',
-    expectedVersion: '2.3.7',
+    expectedVersion: '2.3.8',
   });
   await handleServerEnvelope({
     ...h,

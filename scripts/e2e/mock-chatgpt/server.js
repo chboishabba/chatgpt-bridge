@@ -38,7 +38,7 @@ export async function startMockChatGptServer({ host = '127.0.0.1', port = 0, tab
         if (!artifact) { json(res, 404, { detail: `Artifact not found: ${artifactId}` }); return; }
         res.statusCode = 200;
         res.setHeader('content-type', artifact.mime || 'application/octet-stream');
-        res.setHeader('content-disposition', `attachment; filename="${String(artifact.name || artifactId).replaceAll('"', '')}"`);
+        res.setHeader('content-disposition', `attachment; filename="${String(artifact.fileName || artifact.name || artifactId).replaceAll('"', '')}"`);
         res.end(artifact.buffer);
         return;
       }

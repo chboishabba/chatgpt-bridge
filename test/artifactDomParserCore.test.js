@@ -364,3 +364,38 @@ test('artifact action selection permits a stable block/action locator when a gen
   assert.equal(selected.ok, true);
   assert.equal(selected.locatorIdentity, true);
 });
+
+test('artifact action selection accepts the exact generic download label when ChatGPT exposes no filename', async () => {
+  const core = await loadCore();
+  const label = 'Download the complete project ZIP';
+  const selected = core.selectArtifactActionCandidate({
+    name: label,
+    actionLabel: label,
+    kind: 'action',
+  }, [{
+    name: '',
+    fileName: '',
+    actionLabel: label,
+    actionTag: 'button',
+  }]);
+  assert.equal(selected.ok, true);
+  assert.equal(selected.index, 0);
+  assert.equal(selected.exactName, false);
+  assert.equal(selected.exactActionLabel, true);
+  assert.equal(selected.candidateActionLabel, label.toLowerCase());
+});
+
+test('artifact action selection remains fail-closed when generic download labels are ambiguous', async () => {
+  const core = await loadCore();
+  const label = 'Download the complete project ZIP';
+  const selected = core.selectArtifactActionCandidate({
+    name: label,
+    actionLabel: label,
+    kind: 'action',
+  }, [
+    { name: '', actionLabel: label, actionTag: 'button' },
+    { name: '', actionLabel: label, actionTag: 'button' },
+  ]);
+  assert.equal(selected.ok, false);
+  assert.equal(selected.reason, 'artifact_action_identity_ambiguous');
+});

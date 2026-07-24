@@ -83,6 +83,9 @@ test('mock ChatGPT creates workflow project identity and requested source in one
   const prompt = 'Create one real downloadable ZIP artifact containing the complete project. Use projectId local-project. Set package.json name exactly local-package. Set src/index.js to exactly: export const value = "LOCAL";\nInclude workflow E2E marker LOCAL_WORKFLOW.';
   const { output } = await generated(prompt);
   const artifact = output.artifacts[0];
+  assert.equal(artifact.genericDownloadAction, true);
+  assert.equal(artifact.actionLabel, 'Download the complete project ZIP');
+  assert.equal(artifact.fileName, 'local-package.zip');
   await withZip(artifact.buffer, async (file) => {
     const identity = JSON.parse((await readZipEntry(file, '.bridge/PROJECT_ID.json')).toString('utf8'));
     assert.equal(identity.projectId, 'local-project');

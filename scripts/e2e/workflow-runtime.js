@@ -46,7 +46,7 @@ function workflowEventLog(event = {}, scope = 'workflow') {
     case 'workflow.context.sync.failed': return ['fail', scope, 'Project identity context synchronization failed', { reason: data.reason, message: data.message }];
     case 'workflow.turn.observed': return ['state', scope, 'Passive observer received a new terminal assistant turn', { turnKey: data.turnKey, artifacts: data.artifactCount }];
     case 'workflow.artifacts.discovered': return ['search', scope, 'Scanning the observed turn for workflow artifacts', { found: data.count, source: data.source }];
-    case 'workflow.artifact.download.started': return ['action', scope, 'Downloading the selected workflow artifact', fields];
+    case 'workflow.artifact.materialization.started': return ['action', scope, 'Preparing the selected workflow artifact for download', fields];
     case 'workflow.artifact.download.completed': return ['ok', scope, 'Workflow artifact downloaded', fields];
     case 'workflow.artifact.verify.started': return ['action', scope, 'Verifying archive safety and project identity', fields];
     case 'workflow.artifact.verify.completed': return ['ok', scope, 'Artifact verification passed', { ...fields, overlap: data.overlapScore, projectId: data.projectId, artifactProjectId: data.artifactProjectId }];

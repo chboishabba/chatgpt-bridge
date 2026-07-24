@@ -263,10 +263,16 @@ function browserDebugMessage(event = {}) {
       return ['wait', 'artifact', 'Waiting for the selected artifact preview to become stable', { ...fields, artifactId: data.artifactId, timeoutMs: data.timeoutMs }];
     case 'artifact.preview.readiness_timeout':
       return ['warn', 'artifact', 'Artifact preview did not stabilize before timeout', { ...fields, artifactId: data.artifactId, timeoutMs: data.timeoutMs }];
+    case 'artifact.action.wait.started':
+      return ['wait', 'artifact', 'Waiting for the exact artifact action to become usable', { ...fields, artifactId: data.artifactId, expectedName: data.expectedName, expectedActionLabel: data.expectedActionLabel, timeoutMs: data.timeoutMs }];
     case 'artifact.action.resolved':
-      return ['search', 'artifact', 'Resolved the scoped artifact action', { ...fields, artifactId: data.artifactId, name: data.name, source: data.source, candidates: data.candidateCount }];
+      return ['search', 'artifact', 'Resolved the scoped artifact action', { ...fields, artifactId: data.artifactId, expectedName: data.expectedName, candidateName: data.candidateName, exactName: data.exactName, exactActionLabel: data.exactActionLabel }];
+    case 'artifact.action.ready':
+      return ['ok', 'artifact', 'Exact artifact action is ready', { ...fields, artifactId: data.artifactId, candidateName: data.candidateName, actionLabel: data.candidateActionLabel, waitedMs: data.waitedMs }];
     case 'artifact.action.clicked':
-      return ['action', 'artifact', 'Clicking the selected artifact action once', { ...fields, artifactId: data.artifactId, name: data.name, source: data.source }];
+      return ['action', 'artifact', 'Clicking the selected artifact action once', { ...fields, artifactId: data.artifactId, expectedName: data.expectedName, candidateName: data.candidateName }];
+    case 'artifact.download.started':
+      return ['action', 'artifact', 'Artifact download started after action readiness', { ...fields, artifactId: data.artifactId, expectedName: data.expectedName, source: data.source, timeoutMs: data.timeoutMs }];
     case 'artifact.download_capture.armed':
       return ['wait', 'artifact', 'Armed a Chrome download capture before clicking the artifact', { ...fields, artifactId: data.artifactId, captureId: data.captureId, timeoutMs: data.timeoutMs }];
     case 'artifact.page_capture.armed':

@@ -70,3 +70,24 @@ test('workflow waits prefer success and use committed v3 outcome for terminal fa
   assert.equal(second.matched, completed);
   assert.equal(second.fatal, null);
 });
+
+test('workflow waits fail immediately when materialization enters recovery action state', () => {
+  const workflow = {
+    workflowStateRevision: 9,
+    lifecycle: 'waiting_action',
+    phase: 'downloading',
+    nextAction: {
+      id: 'recovery-1',
+      kind: 'recovery',
+      reason: 'Artifact action did not become ready',
+    },
+  };
+  const outcome = findWorkflowWaitOutcome([], {
+    predicate: () => false,
+    workflow,
+  });
+  assert.equal(outcome.matched, null);
+  assert.equal(outcome.fatal.type, 'workflow.action.required');
+  assert.equal(outcome.fatal.data.actionId, 'recovery-1');
+  assert.equal(outcome.fatal.data.phase, 'downloading');
+});

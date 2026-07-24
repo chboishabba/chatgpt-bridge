@@ -31,6 +31,7 @@ export class PassiveMaterializationRecovery {
     const pipelineId = runtime.workflowState?.run?.id || runtime.lastPipelineId || '';
     const attempt = Math.max(0, Number(context.materializationAttempt) || 0);
     const message = error?.message || String(error);
+    const retrying = attempt < 1 && String(error?.code || '') !== 'ARTIFACT_ACTION_NOT_READY';
     runtime.lastError = '';
     if (pipelineId && runtime.workflowState.lifecycle === WorkflowLifecycle.RUNNING) {
       await this.transition(runtime, WorkflowEventType.RECOVERY_STARTED, {
@@ -39,14 +40,14 @@ export class PassiveMaterializationRecovery {
         pipelineId,
         message,
         attempt,
-        willRetry: attempt < 1,
+        willRetry: retrying,
       });
     } else {
       await this.persist(runtime);
-      await this.publish(runtime.id, 'workflow.artifact.materialization.deferred', { pipelineId, message, attempt, willRetry: attempt < 1 });
+      await this.publish(runtime.id, 'workflow.artifact.materialization.deferred', { pipelineId, message, attempt, willRetry: retrying });
     }
     this.refresh(runtime);
-    if (attempt < 1 && runtime.workflowState?.lifecycle === WorkflowLifecycle.RECOVERING) {
+    if (retrying && runtime.workflowState?.lifecycle === WorkflowLifecycle.RECOVERING) {
       const timer = setTimeout(() => {
         this.retryTimers.delete(timer);
         const effect = Object.values(runtime.workflowState.effects || {}).find((item) => item.runId === pipelineId && item.kind === 'download' && item.status === 'failed');
@@ -72,6 +73,6 @@ export class PassiveMaterializationRecovery {
         safeContinuation: 'Retry reuses the same observed turn without writing project files.',
       }, 'workflow.recovery.required');
     }
-    return { status: 'materialization-deferred', retrying: attempt < 1, message };
+    return { status: 'materialization-deferred', retrying, message };
   }
 }

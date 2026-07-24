@@ -46,6 +46,28 @@ test('owned child termination observes an exit emitted synchronously by kill', a
   assert.equal(Date.now() - started < 250, true);
 });
 
+test('owned child termination force-kills a process that ignores graceful shutdown', async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === 'SIGKILL') {
+      child.signalCode = signal;
+      child.emit('exit', null, signal);
+    }
+    return true;
+  };
+
+  const result = await terminateOwnedChild(child, { timeoutMs: 5, forceTimeoutMs: 50 });
+
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(result.exited, true);
+  assert.equal(result.forced, true);
+  assert.equal(result.signal, 'SIGKILL');
+});
+
 test('owned E2E bridge is isolated from terminal signals on POSIX', () => {
   const posix = ownedBridgeSpawnOptions({ cwd: '/tmp', stdio: ['ignore', 'pipe', 'pipe'] }, 'darwin');
   const windows = ownedBridgeSpawnOptions({ cwd: 'C:/tmp' }, 'win32');

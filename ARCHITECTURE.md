@@ -6,9 +6,9 @@ The workflow v3 and Protocol 5 hard cut is implemented in the current tree. Prot
 
 Current versions:
 
-- bridge package: `6.3.6`;
-- extension package: `2.3.7`;
-- content runtime: `4.3.6`;
+- bridge package: `6.3.7`;
+- extension package: `2.3.8`;
+- content runtime: `4.3.7`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - workflow runtime schema: `3` only.
@@ -284,7 +284,7 @@ Download capture is a separate persisted reducer. A capture stores:
 - Chrome download ID when bound;
 - `planned | armed | bound | completed | failed | released`.
 
-A Chrome download binds only to the armed capture for the same lease and expected artifact identity. Exact filename matching is a fallback only when no download ID is known; fuzzy filename matching is forbidden. Capture state is committed before content/server notification. Content disconnect alone does not erase a persisted capture.
+A Chrome download binds only to the armed capture for the same lease and expected artifact identity. Exact filename matching is a fallback only when no download ID is known; fuzzy filename matching is forbidden. Capture state is committed before content/server notification. Content disconnect alone does not erase a persisted capture. Artifact action readiness is proved before capture channels are armed. The action identity may be an exact filename, a stable source-turn locator, or one unambiguous exact action label when the product exposes no filename; shared CSS selectors and duplicate generic labels are never identity. Download timing begins only after that proven action is activated.
 
 Artifact selection and ZIP/result validation remain server policies. A valid capture does not prove that the selected file is semantically the required artifact.
 
