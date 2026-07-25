@@ -6,14 +6,22 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.9`;
-- extension: `2.3.8`;
-- content runtime: `4.3.7`;
+- bridge package: `6.3.10`;
+- extension: `2.3.9`;
+- content runtime: `4.3.8`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - WebSocket endpoint: `/extension/ws`.
 
 No polling, page-context WebSocket, userscript transport, protocol downgrade, alternate request lifecycle, job API, or alternate interactive runtime remains.
+
+## 6.3.10 hidden-tab submission and physical release parity
+
+- Prompt submission evidence is mutation-driven and armed before the physical click. Hidden ChatGPT tabs no longer depend on chained timers that Chrome may throttle after several background minutes.
+- Steering send-control discovery is also mutation-driven. Timer deadlines remain bounded fallbacks, not the mechanism that detects the DOM transition.
+- `BrowserBridge.health()` projects the command registry's exact physical release barrier as `releasePending/releaseState` without moving release ownership into the hub. E2E recovery blocks later scenarios when the background terminal is `lease.quarantined`.
+- Model/effort E2E treats the extension-verified picker state as authoritative. Exact model wording is retained as diagnostic evidence, because a selected model may answer `MOD`, an empty string, or another noncompliant value.
+- The mock and reviewed E2E-46 fixture reproduce a hidden/unfocused tab, non-exact model output, and a gap between content cleanup and physical lease terminal settlement.
 
 ## 6.3.9 E2E artifact parity and exact source cleanup
 

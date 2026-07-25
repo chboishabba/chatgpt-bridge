@@ -2,14 +2,20 @@
 
 ## Current release
 
-- Bridge package: `6.3.9`.
-- Extension manifest: `2.3.8`.
-- Content runtime: `4.3.7`.
+- Bridge package: `6.3.10`.
+- Extension manifest: `2.3.9`.
+- Content runtime: `4.3.8`.
 - Extension protocol: `5` only.
 - Background persistence schema: `6` only.
 - Workflow runtime schema: `3` only.
 - Interactive dependency: exact `terlio.js@1.1.0`.
 - `package-lock.json` references public npm registry URLs only.
+
+## 6.3.10 hidden-tab submission and lease settlement
+
+- Real E2E 46 exposed Chrome timer throttling after a tab remained hidden for roughly five minutes. Prompt and steer UI proof now use pre-armed DOM mutation observation.
+- Recovery waits for the command registry release barrier and never reuses a quarantined tab.
+- Local model-effort parity deliberately returns `MOD` after a verified instant selection so picker tests cannot depend on model obedience.
 
 ## 6.3.9 live/mock artifact parity
 

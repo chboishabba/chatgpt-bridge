@@ -24,8 +24,8 @@ test('failed scenario settles canonical work and lease before continuing to the 
           composerReady: true,
           chatMainReady: true,
           activeRequest: stopped ? null : { requestId: 'stale' },
-          releasingRequestId: '',
-          releaseStatus: '',
+          releasePending: false,
+          releaseState: 'idle',
           tabObservation: { generation: stopped ? 'idle' : 'active' },
         }],
       };
@@ -77,8 +77,8 @@ test('failed scenario reloads only after canonical work and lease settled when t
           composerReady: true,
           chatMainReady: true,
           activeRequest: stopped ? null : { requestId: 'stale' },
-          releasingRequestId: releasePending ? 'stale' : '',
-          releaseStatus: releasePending ? 'pending' : '',
+          releasePending,
+          releaseState: releasePending ? 'pending' : 'idle',
           tabObservation: {
             generation: { state: busy ? 'active' : 'stopped' },
             output: { state: busy ? 'streaming' : 'final' },
@@ -110,6 +110,59 @@ test('failed scenario reloads only after canonical work and lease settled when t
   const settledClientReadIndex = calls.findLastIndex((call, index) => call.pathname === '/browser/clients' && index < reloadIndex);
   assert.ok(stopIndex >= 0 && reloadIndex > stopIndex, 'reload must happen only after canonical stop');
   assert.ok(settledClientReadIndex > stopIndex, 'lease projection must be checked before reload');
+});
+
+
+test('quiescence waits for the physical release barrier and rejects a quarantined terminal lease', async () => {
+  let stopped = false;
+  let clientReads = 0;
+  const api = async (_options, pathname) => {
+    if (pathname === '/browser/stop') { stopped = true; return { cancelled: 1 }; }
+    if (pathname === '/turns?status=running&limit=100') return { turns: [] };
+    if (pathname === '/health') return { activeRequests: stopped ? [] : [{ requestId: 'steer-stale' }] };
+    if (pathname === '/browser/clients') {
+      clientReads += 1;
+      if (clientReads === 1) {
+        return { clients: [{
+          id: 'ext-quarantine', ready: true, pageReady: true, composerReady: true, chatMainReady: true,
+          activeRequest: { requestId: 'steer-stale' }, releasePending: false, releaseState: 'idle',
+          tabObservation: { generation: 'active', output: 'streaming' },
+        }] };
+      }
+      if (clientReads < 4) {
+        return { clients: [{
+          id: 'ext-quarantine', ready: true, pageReady: true, composerReady: true, chatMainReady: true,
+          activeRequest: null, releasePending: true, releaseState: 'pending',
+          tabObservation: { generation: 'stopped', output: 'final' },
+        }] };
+      }
+      return { clients: [{
+        id: 'ext-quarantine', ready: true, pageReady: true, composerReady: true, chatMainReady: true,
+        activeRequest: null, releasePending: false, releaseState: 'quarantined', quarantined: true,
+        quarantineReason: 'RELEASE_CLEANUP_TIMEOUT', tabObservation: { generation: 'stopped', output: 'final' },
+      }] };
+    }
+    throw new Error(`Unexpected path: ${pathname}`);
+  };
+  const waitUntil = async (check) => {
+    for (let index = 0; index < 8; index += 1) {
+      const value = await check();
+      if (value) return value;
+    }
+    throw new Error('not ready');
+  };
+  const result = await recoverBrowserAfterScenarioFailure({
+    options: { tabReadyTimeoutMs: 10_000, quiescenceSettleMs: 0 },
+    sourceClientId: 'ext-quarantine',
+    scenarioId: 'reasoning-steer',
+    api,
+    waitUntil,
+    testLog: () => {},
+  });
+  assert.equal(result.recovered, false);
+  assert.equal(result.reason, 'lease-quarantined');
+  assert.equal(result.quiescence.quarantined, true);
+  assert.ok(clientReads >= 4, 'recovery must not return while releasePending is still true');
 });
 
 test('failed scenario adopts a reconnected content client by stable browser tab identity', async () => {

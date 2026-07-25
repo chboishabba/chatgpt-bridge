@@ -5,6 +5,6 @@
   // extension version. It changes whenever a bundled extension release must be
   // distinguishable from another unpacked directory with the same semver.
   globalThis.ChatGptBridgeBuildIdentity = Object.freeze({
-    bundleId: '1f4a8d26eb6b4a04aeb76b7d482996c1',
+    bundleId: '850010bfeefb7b3c831c6ec47d2adad2',
   });
 })();

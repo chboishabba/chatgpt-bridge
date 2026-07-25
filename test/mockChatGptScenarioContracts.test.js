@@ -47,6 +47,17 @@ test('mock ChatGPT exposes normalized model and effort options for the real E2E 
   assert.equal(intelligence.efforts.filter((option) => option.selected).length, 1);
 });
 
+
+test('mock model-effort scenario reproduces non-exact model wording after a verified instant selection', async () => {
+  const state = new MockChatGptStateMachine({ tabId: 41 });
+  state.setIntelligence({ effort: 'instant' });
+  const prompt = 'This is a short browser E2E check for model and reasoning-effort selection. Output exactly MODEL_EFFORT_OK and nothing else.';
+  state.appendUser(prompt);
+  await state.generate(prompt);
+  assert.equal(state.intelligence().selectedEffort.value, 'instant');
+  assert.equal(state.outputSnapshot().answer, 'MOD');
+});
+
 test('mock ChatGPT emits the complete reasoning checkpoint sequence before the final answer', async () => {
   const { revisions, output } = await generated('This is a reasoning test. TEST_LOCAL_REASONING_BEGIN then TEST_LOCAL_REASONING_FINISH.');
   const percentages = [...new Set(revisions.flatMap(({ snapshot }) => snapshot.progressItems.map((item) => Number.parseInt(item.text, 10))).filter(Number.isFinite))];

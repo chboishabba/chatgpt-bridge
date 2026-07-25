@@ -164,11 +164,19 @@ export class BrowserBridge {
 
   health() {
     const active = this.#hub.activeClient;
+    const clients = Array.from(this.#hub.clients || []).map((client) => {
+      const releasePending = this.#commandRegistry.isReleasePending(client.id);
+      return {
+        ...client,
+        releasePending,
+        releaseState: client.quarantined ? 'quarantined' : releasePending ? 'pending' : 'idle',
+      };
+    });
     return {
       ok: Boolean(active),
       transport: active ? `${active.runtime === 'extension' || active.transport === 'extension' ? 'extension' : 'browser'}:${active.transport || 'unknown'}` : 'extension:disconnected',
-      clients: this.#hub.clients,
-      activeClient: active ? this.#hub.clients.find((client) => client.id === active.id) : null,
+      clients,
+      activeClient: active ? clients.find((client) => client.id === active.id) : null,
       selectedClientId: this.#hub.selectedClientId,
       needsSelection: this.#hub.needsSelection,
       pendingRequests: this.#pending.size,

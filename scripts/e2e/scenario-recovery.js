@@ -42,12 +42,28 @@ function clientReady(client = {}) {
   return Boolean(client.ready && client.pageReady && client.composerReady && client.chatMainReady !== false);
 }
 
+function clientReleasePending(client = {}) {
+  const legacyStatus = String(client.releaseStatus || '').toLowerCase();
+  return client.releasePending === true
+    || Boolean(client.releasingRequestId)
+    || legacyStatus === 'pending';
+}
+
+function clientQuarantined(client = {}) {
+  return client.quarantined === true || String(client.releaseState || '').toLowerCase() === 'quarantined';
+}
+
 function clientBusy(client = {}) {
   const generation = observationState(client.tabObservation?.generation);
   const output = observationState(client.tabObservation?.output);
   return Boolean(client.activeRequest)
+    || clientReleasePending(client)
     || ['active', 'starting', 'streaming'].includes(generation)
     || ['active', 'starting', 'streaming'].includes(output);
+}
+
+function clientReusableIdle(client = {}) {
+  return Boolean(client && clientReady(client) && !clientBusy(client) && !clientQuarantined(client));
 }
 
 export async function waitForOwnedBrowserClient({
@@ -62,7 +78,7 @@ export async function waitForOwnedBrowserClient({
     const snapshot = await api(options, '/browser/clients');
     const candidate = findOwnedBrowserClient(snapshot.clients, identity);
     if (!candidate || !clientReady(candidate)) return null;
-    if (requireIdle && clientBusy(candidate)) return null;
+    if (requireIdle && !clientReusableIdle(candidate)) return null;
     return candidate;
   }, {
     timeoutMs: Math.max(15_000, Number(options?.tabReadyTimeoutMs) || 60_000),
@@ -146,10 +162,9 @@ export async function quiesceBrowserWork({
     }
     const snapshot = await api(options, '/browser/clients', { timeoutMs: 3_000 });
     const client = findOwnedBrowserClient(snapshot.clients, identity);
-    const releaseStatus = String(client?.releaseStatus || '').toLowerCase();
-    const idle = Boolean(client && clientReady(client) && !client.activeRequest
-      && !client.releasingRequestId && releaseStatus !== 'pending' && releaseStatus !== 'failed');
-    if (!idle) {
+    if (clientQuarantined(client)) return { health, client, quarantined: true };
+    const leaseSettled = Boolean(client && clientReady(client) && !client.activeRequest && !clientReleasePending(client));
+    if (!leaseSettled) {
       idleSince = 0;
       idleProjection = null;
       return null;
@@ -162,12 +177,21 @@ export async function quiesceBrowserWork({
     intervalMs: 150,
     message: 'canonical browser request and lease settlement',
   });
-  testLog('state', 'browser-quiescence', 'Canonical browser work and lease settled', {
+  if (settled.quarantined || clientQuarantined(settled.client)) {
+    testLog('warn', 'browser-quiescence', 'Browser lease reached a quarantined terminal state', {
+      cancelled: result.browserCancelled,
+      interruptedTurns: result.interruptedTurns.length,
+      errors: result.errors.length,
+      reason: settled.client?.quarantineReason || settled.client?.releaseState || 'quarantined',
+    });
+    return { ...result, settled: true, reusable: false, quarantined: true, health: settled.health, client: settled.client || null };
+  }
+  testLog('state', 'browser-quiescence', 'Canonical browser work and physical lease release settled', {
     cancelled: result.browserCancelled,
     interruptedTurns: result.interruptedTurns.length,
     errors: result.errors.length,
   });
-  return { ...result, settled: true, health: settled.health, client: settled.client || null };
+  return { ...result, settled: true, reusable: true, health: settled.health, client: settled.client || null };
 }
 
 export async function recoverBrowserAfterScenarioFailure({
@@ -203,7 +227,10 @@ export async function recoverBrowserAfterScenarioFailure({
     });
   }
 
-  if (!clientBusy(client)) {
+  if (clientQuarantined(client)) {
+    return { recovered: false, reason: 'lease-quarantined', client };
+  }
+  if (clientReusableIdle(client)) {
     return { recovered: true, reason: client.id === identity.clientId ? 'already-idle' : 'client-reconnected', client };
   }
 
@@ -224,8 +251,14 @@ export async function recoverBrowserAfterScenarioFailure({
 
   snapshot = await api(options, '/browser/clients');
   client = findOwnedBrowserClient(snapshot.clients, recoveryIdentity) || quiescence.client || client;
-  if (clientReady(client) && !clientBusy(client)) {
-    testLog('ok', scenarioId, 'Canonical request settled and the ChatGPT tab is idle', { url: client.url || '' });
+  if (quiescence.quarantined || clientQuarantined(client)) {
+    testLog('error', scenarioId, 'The owned ChatGPT tab was quarantined during physical lease release; later scenarios are blocked', {
+      reason: client?.quarantineReason || 'lease-quarantined',
+    });
+    return { recovered: false, reason: 'lease-quarantined', client, quiescence };
+  }
+  if (clientReusableIdle(client)) {
+    testLog('ok', scenarioId, 'Canonical request and physical browser lease settled; the ChatGPT tab is reusable', { url: client.url || '' });
     return { recovered: true, reason: 'canonical-work-stopped', url: client.url || '', client, quiescence };
   }
 

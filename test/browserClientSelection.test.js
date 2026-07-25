@@ -7,9 +7,10 @@ import { BrowserBridge } from '../src/browserBridge.js';
 import { commandResult, emitPromptSubmitted, emitTabObservation } from './support/bridgeObservation.js';
 
 class ClientSelectionHub extends EventEmitter {
-  constructor(clients = []) {
+  constructor(clients = [], options = {}) {
     super();
     this.sent = [];
+    this.autoRelease = options.autoRelease !== false;
     this.reloadControlCalls = [];
     this._clients = clients;
     this._selectedClientId = clients.find((client) => client.selected)?.id || '';
@@ -44,7 +45,7 @@ class ClientSelectionHub extends EventEmitter {
         } });
       });
     }
-    if (payload.type === 'request.release') {
+    if (payload.type === 'request.release' && this.autoRelease) {
       setImmediate(() => this.emit('client.message', {
         clientId,
         payload: { type: 'lease.released', commandId: payload.commandId,
@@ -79,6 +80,43 @@ async function finishPrompt(hub, clientId, prompt, answer = 'ok') {
     conversationId: prompt.options.sessionId || 'new',
   });
 }
+
+
+test('health projects the command registry physical release barrier without making the hub its owner', async () => {
+  const hub = new ClientSelectionHub([{
+    id: 'client-release-projection', ready: true, pageReady: true, composerReady: true, chatMainReady: true,
+    url: 'https://chatgpt.com/c/session-release', session: { id: 'session-release' }, activeRequest: null,
+  }], { autoRelease: false });
+  const bridge = new BrowserBridge(hub);
+  const resultPromise = bridge.sendRequest({ message: 'hello', sessionId: 'session-release' }, {}, { fullResponse: true });
+  await nextTick();
+  const prompt = hub.sent.find((entry) => entry.payload.type === 'prompt.send');
+  assert.ok(prompt);
+  await finishPrompt(hub, 'client-release-projection', prompt.payload);
+  for (let index = 0; index < 20 && !hub.sent.some((entry) => entry.payload.type === 'request.release'); index += 1) await nextTick();
+  const release = hub.sent.find((entry) => entry.payload.type === 'request.release');
+  assert.ok(release, 'bridge must start the physical release command after terminal completion');
+
+  let health = bridge.health();
+  assert.equal(health.clients[0].releasePending, true);
+  assert.equal(health.clients[0].releaseState, 'pending');
+  assert.equal(Object.hasOwn(hub.clients[0], 'releasePending'), false, 'hub projection remains free of release lifecycle ownership');
+
+  hub.emit('client.message', {
+    clientId: 'client-release-projection',
+    payload: {
+      type: 'lease.released',
+      commandId: release.payload.commandId,
+      requestId: release.payload.requestId,
+      released: true,
+      activeRequest: null,
+    },
+  });
+  await resultPromise;
+  health = bridge.health();
+  assert.equal(health.clients[0].releasePending, false);
+  assert.equal(health.clients[0].releaseState, 'idle');
+});
 
 test('prompt target prefers an idle tab already on the requested session', async () => {
   const hub = new ClientSelectionHub([
@@ -451,15 +489,15 @@ test('extension reload falls back to the deployed maintenance page only after th
       const parsed = new URL(url);
       assert.equal(`${parsed.protocol}//${parsed.host}`, original.origin);
       assert.equal(parsed.pathname, '/maintenance-reload.html');
-      assert.equal(parsed.searchParams.get('expectedVersion'), '2.3.8');
+      assert.equal(parsed.searchParams.get('expectedVersion'), '2.3.9');
       assert.equal(parsed.searchParams.get('sourceTabId'), '42');
       assert.equal(parsed.searchParams.get('sourceLaunchToken'), original.launchToken);
       assert.equal(parsed.searchParams.get('serverUrl'), 'http://127.0.0.1:18181');
       const reconnected = {
         ...original,
         id: 'client-maintenance-bootstrap-new',
-        extensionVersion: '2.3.8',
-        clientVersion: '4.3.7',
+        extensionVersion: '2.3.9',
+        clientVersion: '4.3.8',
         compatible: true,
         compatibility: { compatible: true, status: 'compatible' },
         connectedAt: new Date().toISOString(),
@@ -471,12 +509,12 @@ test('extension reload falls back to the deployed maintenance page only after th
 
   const result = await bridge.reloadExtension({
     sourceClientId: original.id,
-    expectedVersion: '2.3.8',
+    expectedVersion: '2.3.9',
     timeoutMs: 2_000,
     allowMaintenancePageBootstrap: true,
   });
 
-  assert.equal(result.reconnected.extensionVersion, '2.3.8');
+  assert.equal(result.reconnected.extensionVersion, '2.3.9');
   assert.equal(result.recovery.reason, 'maintenance_page_after_command_failure');
   assert.equal(openedUrls.length, 1);
   assert.equal(hub.sent.some((entry) => entry.payload.type === 'extension.reload'), true);
@@ -525,8 +563,8 @@ test('extension reload opens the maintenance page when an accepted restart does 
       const reconnected = {
         ...original,
         id: 'client-maintenance-after-ack-new',
-        extensionVersion: '2.3.8',
-        clientVersion: '4.3.7',
+        extensionVersion: '2.3.9',
+        clientVersion: '4.3.8',
         connectedAt: new Date().toISOString(),
       };
       hub._clients = [reconnected];
@@ -536,12 +574,12 @@ test('extension reload opens the maintenance page when an accepted restart does 
 
   const result = await bridge.reloadExtension({
     sourceClientId: original.id,
-    expectedVersion: '2.3.8',
+    expectedVersion: '2.3.9',
     timeoutMs: 3_000,
     allowMaintenancePageBootstrap: true,
   });
 
-  assert.equal(result.reconnected.extensionVersion, '2.3.8');
+  assert.equal(result.reconnected.extensionVersion, '2.3.9');
   assert.equal(result.recovery.reason, 'maintenance_page_after_stalled_command');
   assert.equal(result.accepted.bootstrapPage, true);
   assert.equal(openedUrls.length, 1);
@@ -556,8 +594,8 @@ test('extension reload accepts a compatible reconnect even when the old runtime 
     launchToken: 'bridge-real-e2e-reconnect123',
     url: 'https://chatgpt.com/c/reconnect-before-result',
     origin: 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb',
-    extensionVersion: '2.3.8',
-    clientVersion: '4.3.7',
+    extensionVersion: '2.3.9',
+    clientVersion: '4.3.8',
     extensionProtocolVersion: 5,
     compatible: true,
     compatibility: { compatible: true, status: 'compatible' },
@@ -578,10 +616,10 @@ test('extension reload accepts a compatible reconnect even when the old runtime 
   const bridge = new BrowserBridge(hub, null, null, { publicBaseUrl: 'http://127.0.0.1:18181' });
   const result = await bridge.reloadExtension({
     sourceClientId: original.id,
-    expectedVersion: '2.3.8',
+    expectedVersion: '2.3.9',
     timeoutMs: 2_000,
   });
   assert.equal(result.recovery.reason, 'reconnected_before_terminal_result');
-  assert.equal(result.reconnected.extensionVersion, '2.3.8');
+  assert.equal(result.reconnected.extensionVersion, '2.3.9');
   assert.equal(hub.reloadControlCalls.length, 1);
 });

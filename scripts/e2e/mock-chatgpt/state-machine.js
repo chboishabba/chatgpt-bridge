@@ -220,6 +220,10 @@ async function responseForPrompt(prompt, context = {}) {
     return { answer: 'Created the fallback project ZIP.', artifacts: [artifact(randomUUID(), 'project-fallback.zip', 'application/zip', buffer)] };
   }
 
+  if (exact === 'MODEL_EFFORT_OK' && String(context.selectedEffort || '').toLowerCase() === 'instant') {
+    return { answer: 'MOD' };
+  }
+
   if (/Inspect the immediately previous assistant message/i.test(source)) {
     const expectedPrevious = source.match(/exactly\s+([^,]+), output exactly/i)?.[1]?.trim() || '';
     const success = source.match(/output exactly\s+([^\s.]+).*Otherwise output exactly/i)?.[1] || exact;
@@ -404,6 +408,8 @@ export class MockChatGptStateMachine {
       previousProjectResult: this.lastProjectResult,
       previousProjectFiles: this.lastProjectFiles,
       previousWorkflowContext: this.lastWorkflowContext,
+      selectedModel: this.selectedModel,
+      selectedEffort: this.selectedEffort,
     });
     const generationSequence = ++this.generationSequence;
     this.activeGenerationSequence = generationSequence;

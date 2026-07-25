@@ -57,7 +57,7 @@ function effectResultBody(step = {}, request = {}, result = {}) {
 }
 
 export class MockExtensionTab extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null, releaseDelayMs = 150 } = {}) {
     super();
     if (!bridgeUrl) throw new TypeError('Mock extension tab requires bridgeUrl');
     this.bridgeUrl = String(bridgeUrl).replace(/\/$/, '');
@@ -86,6 +86,7 @@ export class MockExtensionTab extends EventEmitter {
     this.extensionReloadCount = 0;
     this.pageReloadCount = 0;
     this.trampolineReloadCount = 0;
+    this.releaseDelayMs = Math.max(0, Number(releaseDelayMs) || 0);
   }
 
   publicLayoutUrl() {
@@ -374,7 +375,7 @@ export class MockExtensionTab extends EventEmitter {
         await this.#result(envelope, 'extension.reload.accepted', {
           accepted: true,
           scheduled: true,
-          expectedVersion: body.expectedVersion || '2.3.8',
+          expectedVersion: body.expectedVersion || '2.3.9',
           pageReload: { armed: true, owner: 'mock-main-world-timer', delayMs: Number(body.pageReloadDelayMs) || 2_500 },
           recoveryWake: { armed: true, owner: 'mock-extension-alarm' },
           reloadTrampoline: { planned: true, count: 1, owner: 'mock-local-bridge-page' },
@@ -508,6 +509,7 @@ export class MockExtensionTab extends EventEmitter {
     const request = requestIdentity(envelope, envelope.body);
     this.state.activeRequest = null;
     await this.publishObservation('request.release');
+    if (this.releaseDelayMs) await delay(this.releaseDelayMs);
     await this.send(ExtensionMessageType.LEASE_RELEASED, {
       commandId: envelope.commandId,
       requestId: request.requestId,

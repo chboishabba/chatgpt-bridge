@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "sourceRun": "last-real-e2e(46)",
+  "reviewed": true,
+  "tab": {
+    "visibility": "hidden",
+    "focused": false
+  },
+  "promptSubmission": {
+    "sendButtonFound": true,
+    "physicalMethod": "button",
+    "timerPollingWaitedMs": 55000,
+    "timerPollingOutcome": "submission_ack_timeout",
+    "submittedTurnDiscoveredLater": true,
+    "requiredLocalContract": "DOM mutation evidence is armed before the physical click"
+  },
+  "release": {
+    "activeRequestClearedBeforeTerminal": true,
+    "terminalDelayMs": 8002,
+    "terminalOutcome": "quarantined",
+    "terminalCode": "RELEASE_CLEANUP_TIMEOUT",
+    "requiredLocalContract": "server releasePending remains true until lease.released or lease.quarantined"
+  },
+  "modelEffort": {
+    "pickerStateVerified": true,
+    "requestedEffort": "instant",
+    "actualAnswer": "MOD",
+    "requiredLocalContract": "picker verification is authoritative; exact model wording is not"
+  }
+}

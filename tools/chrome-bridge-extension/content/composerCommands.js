@@ -58,14 +58,66 @@ function promptSubmissionEvidence(request, baselineTurnKeys, message, composerBe
   return { confirmed: false, reason: 'no_submission_evidence' };
 }
 
-async function waitForPromptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore, timeoutMs) {
+function createPromptSubmissionEvidenceWaiter(request, baselineTurnKeys, message, composerBefore, timeoutMs) {
   const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const evidence = promptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore);
-    if (evidence.confirmed) return { ...evidence, waitedMs: Date.now() - started };
-    await delay(120);
+  const target = findChatMain() || document.body || document.documentElement;
+  let observer = null;
+  let timer = null;
+  let settled = false;
+  let lastEvidence = promptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore);
+  let resolvePromise = null;
+  const promise = new Promise((resolve) => { resolvePromise = resolve; });
+
+  const finish = (evidence) => {
+    if (settled) return;
+    settled = true;
+    observer?.disconnect?.();
+    if (timer) clearTimeout(timer);
+    resolvePromise({ ...evidence, waitedMs: Date.now() - started });
+  };
+
+  const inspect = () => {
+    if (settled) return lastEvidence;
+    lastEvidence = promptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore);
+    if (lastEvidence.confirmed) finish(lastEvidence);
+    return lastEvidence;
+  };
+
+  if (target && typeof MutationObserver === 'function') {
+    observer = new MutationObserver(() => inspect());
+    observer.observe(target, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['aria-disabled', 'data-testid', 'disabled', 'value'],
+    });
   }
-  return { confirmed: false, reason: 'submission_ack_timeout', waitedMs: Date.now() - started };
+
+  timer = setTimeout(() => finish({
+    confirmed: false,
+    reason: 'submission_ack_timeout',
+    lastReason: lastEvidence?.reason || 'no_submission_evidence',
+  }), timeoutMs);
+
+  return Object.freeze({
+    async wait() {
+      const immediate = inspect();
+      if (immediate.confirmed) return { ...immediate, waitedMs: Date.now() - started };
+      return await promise;
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      observer?.disconnect?.();
+      if (timer) clearTimeout(timer);
+      resolvePromise({ confirmed: false, reason: 'submission_evidence_wait_cancelled', waitedMs: Date.now() - started });
+    },
+  });
+}
+
+async function waitForPromptSubmissionEvidence(request, baselineTurnKeys, message, composerBefore, timeoutMs) {
+  return await createPromptSubmissionEvidenceWaiter(request, baselineTurnKeys, message, composerBefore, timeoutMs).wait();
 }
 
 function resolveSubmissionAckTimeoutMs(request, kind = 'prompt') {
@@ -96,18 +148,47 @@ function restoreComposerText(element, value = '') {
 
 async function waitForSteerSubmitButton(request, timeoutMs = resolveSteerSubmitReadyTimeoutMs(request)) {
   const started = Date.now();
+  const target = findComposerRootStrict() || findChatMain() || document.body || document.documentElement;
+  let observer = null;
+  let timer = null;
+  let settled = false;
   let lastDiagnosticAt = 0;
-  while (Date.now() - started < timeoutMs) {
+  let resolvePromise = null;
+  let rejectPromise = null;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+
+  const cleanup = () => {
+    observer?.disconnect?.();
+    if (timer) clearTimeout(timer);
+  };
+  const succeed = (button) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    const waitedMs = Date.now() - started;
+    diagnostic('steer.submit.ready', {
+      requestId: request?.requestId || '',
+      waitedMs,
+      label: button.getAttribute?.('aria-label') || button.getAttribute?.('title') || button.getAttribute?.('data-testid') || '',
+    });
+    resolvePromise({ button, waitedMs });
+  };
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectPromise(error);
+  };
+  const inspect = () => {
+    if (settled) return;
     const roots = [findComposerRootStrict()].filter(Boolean);
     const button = findSendButton(roots);
     if (button) {
-      const waitedMs = Date.now() - started;
-      diagnostic('steer.submit.ready', {
-        requestId: request?.requestId || '',
-        waitedMs,
-        label: button.getAttribute?.('aria-label') || button.getAttribute?.('title') || button.getAttribute?.('data-testid') || '',
-      });
-      return { button, waitedMs };
+      succeed(button);
+      return;
     }
 
     const stopVisible = Boolean(findStopButton(roots));
@@ -118,7 +199,8 @@ async function waitForSteerSubmitButton(request, timeoutMs = resolveSteerSubmitR
       error.retryable = false;
       error.provenNotExecuted = true;
       error.cancellationEvidence = { source: 'composer', reason: 'response_finalized_before_steer_submit' };
-      throw error;
+      fail(error);
+      return;
     }
 
     const now = Date.now();
@@ -137,15 +219,28 @@ async function waitForSteerSubmitButton(request, timeoutMs = resolveSteerSubmitR
         sendButtonVisible: false,
       });
     }
-    await delay(120);
-  }
+  };
 
-  const error = new Error(`STEER_SUBMIT_NOT_READY: ChatGPT did not expose an enabled steering send control within ${timeoutMs}ms`);
-  error.code = 'STEER_SUBMIT_NOT_READY';
-  error.retryable = true;
-  error.provenNotExecuted = true;
-  error.cancellationEvidence = { source: 'composer', reason: 'steer_send_control_not_available' };
-  throw error;
+  if (target && typeof MutationObserver === 'function') {
+    observer = new MutationObserver(() => inspect());
+    observer.observe(target, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['aria-disabled', 'aria-label', 'data-testid', 'disabled'],
+    });
+  }
+  timer = setTimeout(() => {
+    const error = new Error(`STEER_SUBMIT_NOT_READY: ChatGPT did not expose an enabled steering send control within ${timeoutMs}ms`);
+    error.code = 'STEER_SUBMIT_NOT_READY';
+    error.retryable = true;
+    error.provenNotExecuted = true;
+    error.cancellationEvidence = { source: 'composer', reason: 'steer_send_control_not_available' };
+    fail(error);
+  }, timeoutMs);
+  inspect();
+  return await promise;
 }
 
 async function enterPrompt(message, request, options = {}) {
@@ -174,14 +269,18 @@ async function enterPrompt(message, request, options = {}) {
 
   await delay(160);
   let method = '';
+  let evidenceWaiter = null;
   try {
     if (kind === 'steer') {
       const ready = await waitForSteerSubmitButton(request);
+      evidenceWaiter = createPromptSubmissionEvidenceWaiter(request, baselineTurnKeys, message, composer, ackTimeoutMs);
       method = submitComposer(composer, request, { kind, attempt: 1, button: ready.button });
     } else {
+      evidenceWaiter = createPromptSubmissionEvidenceWaiter(request, baselineTurnKeys, message, composer, ackTimeoutMs);
       method = submitComposer(composer, request, { kind, attempt: 1 });
     }
   } catch (error) {
+    evidenceWaiter?.cancel?.();
     if (kind === 'steer' && error?.provenNotExecuted === true) {
       try { restoreComposerText(composer, composerBeforeText); } catch {}
       diagnostic('steer.submit.rolled_back', {
@@ -192,7 +291,7 @@ async function enterPrompt(message, request, options = {}) {
     }
     throw error;
   }
-  const evidence = await waitForPromptSubmissionEvidence(request, baselineTurnKeys, message, composer, ackTimeoutMs);
+  const evidence = await evidenceWaiter.wait();
   diagnostic('prompt.submit.attempt', { requestId: request.requestId, kind, attempt: 1, method, ...evidence });
   emitChatEvent(request, evidence.confirmed ? 'prompt.submit.confirmed' : 'prompt.submit.uncertain', {
     kind, attempt: 1, method, ...evidence,
@@ -707,6 +806,8 @@ function isUsableButton(element) {
     return Object.freeze({
       enterPrompt,
       promptSubmissionEvidence,
+      createPromptSubmissionEvidenceWaiter,
+      waitForPromptSubmissionEvidence,
       resolveSubmissionAckTimeoutMs,
       resolveSteerSubmitReadyTimeoutMs,
       waitForSteerSubmitButton,

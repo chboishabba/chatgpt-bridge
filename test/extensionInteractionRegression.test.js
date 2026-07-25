@@ -73,10 +73,16 @@ test('composer steering refuses to synthesize Enter while ChatGPT exposes only t
 });
 
 
-test('composer steering waits for a real enabled send control before clicking once', async () => {
+test('composer steering observes the real send control without relying on hidden-tab timer polling', async () => {
   const { sandbox } = await bootstrapExtensionContentRuntime();
-  let delayCount = 0;
+  let mutationCallback = null;
+  let sendReady = false;
   let clickCount = 0;
+  sandbox.MutationObserver = class {
+    constructor(callback) { mutationCallback = callback; }
+    observe() {}
+    disconnect() {}
+  };
   const sendButton = {
     disabled: false,
     isConnected: true,
@@ -93,17 +99,21 @@ test('composer steering waits for a real enabled send control before clicking on
     },
   };
   const form = {
+    nodeType: 1,
     tagName: 'FORM',
+    isConnected: true,
     matches() { return false; },
     closest() { return null; },
     querySelectorAll(selector) {
-      if (selector.includes('send') || selector.includes('Send')) return delayCount >= 2 ? [sendButton] : [];
-      if (selector.includes('stop') || selector.includes('Stop')) return delayCount < 2 ? [stopButton] : [];
-      if (selector === 'button, [role="button"]') return delayCount >= 2 ? [sendButton] : [stopButton];
+      if (selector.includes('send') || selector.includes('Send')) return sendReady ? [sendButton] : [];
+      if (selector.includes('stop') || selector.includes('Stop')) return sendReady ? [] : [stopButton];
+      if (selector === 'button, [role="button"]') return sendReady ? [sendButton] : [stopButton];
       return [];
     },
+    contains(node) { return node === composer || node === sendButton || node === stopButton; },
   };
   const composer = {
+    nodeType: 1,
     tagName: 'DIV', isConnected: true, isContentEditable: true, disabled: false, readOnly: false,
     parentElement: form,
     getAttribute(name) { if (name === 'contenteditable') return 'plaintext-only'; if (name === 'id') return 'prompt-textarea'; return null; },
@@ -114,11 +124,15 @@ test('composer steering waits for a real enabled send control before clicking on
   const diagnostics = [];
   const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
     CONFIG: { steerSubmitReadyTimeoutMs: 5_000 },
-    async delay() { delayCount += 1; },
     diagnostic(name, data) { diagnostics.push({ name, data }); },
   }));
 
-  const ready = await commands.waitForSteerSubmitButton({ requestId: 'steer-wait', options: {} });
+  const pending = commands.waitForSteerSubmitButton({ requestId: 'steer-wait', options: {} });
+  await Promise.resolve();
+  assert.equal(typeof mutationCallback, 'function');
+  sendReady = true;
+  mutationCallback([{ type: 'childList' }]);
+  const ready = await pending;
   assert.equal(ready.button, sendButton);
   const method = commands.submitComposer(composer, { requestId: 'steer-wait' }, { kind: 'steer', button: ready.button });
   assert.equal(method, 'button');
@@ -241,6 +255,98 @@ test('artifact source lookup forwards both the stored turn key and turn index', 
 });
 
 
+test('prompt submission evidence is armed before click and resolves from a DOM mutation when timers are throttled', async () => {
+  const { sandbox } = await bootstrapExtensionContentRuntime();
+  let mutationCallback = null;
+  let observerArmed = false;
+  let turns = [];
+  sandbox.MutationObserver = class {
+    constructor(callback) { mutationCallback = callback; }
+    observe() { observerArmed = true; }
+    disconnect() {}
+  };
+  sandbox.setTimeout = () => 1;
+  sandbox.clearTimeout = () => {};
+  sandbox.DataTransfer = class {
+    constructor() { this.value = ''; }
+    setData(_type, value) { this.value = String(value); }
+  };
+  sandbox.ClipboardEvent = class {
+    constructor(type, options = {}) { this.type = type; this.clipboardData = options.clipboardData; }
+  };
+  sandbox.InputEvent = class { constructor(type) { this.type = type; } };
+
+  const prompt = 'hidden tab prompt';
+  const userTurn = { textContent: prompt };
+  const sendButton = {
+    disabled: false,
+    isConnected: true,
+    getAttribute(name) { return name === 'data-testid' ? 'send-button' : null; },
+    click() {
+      assert.equal(observerArmed, true, 'submission observer must be armed before the physical click');
+      turns = [userTurn];
+      mutationCallback([{ type: 'childList' }]);
+    },
+  };
+  const form = {
+    nodeType: 1,
+    tagName: 'FORM',
+    isConnected: true,
+    matches() { return false; },
+    closest() { return null; },
+    querySelectorAll(selector) {
+      if (selector.includes('send') || selector.includes('Send') || selector === 'button, [role="button"]') return [sendButton];
+      return [];
+    },
+    contains(node) { return node === composer || node === sendButton; },
+    getAttribute() { return null; },
+  };
+  const composer = {
+    nodeType: 1,
+    tagName: 'TEXTAREA',
+    value: '',
+    disabled: false,
+    readOnly: false,
+    isConnected: true,
+    parentElement: form,
+    focus() {},
+    getAttribute(name) { return name === 'id' ? 'prompt-textarea' : null; },
+    closest(selector) { return selector === 'form' ? form : selector.includes('main') ? main : null; },
+    querySelectorAll() { return []; },
+    dispatchEvent(event) {
+      if (event?.type === 'paste') this.value = String(event.clipboardData?.value || '');
+      return true;
+    },
+  };
+  const main = {
+    nodeType: 1,
+    tagName: 'MAIN',
+    isConnected: true,
+    contains(node) { return node === composer || node === form || node === sendButton || node === userTurn; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    getAttribute() { return null; },
+  };
+  sandbox.document.querySelectorAll = (selector) => {
+    if (selector.includes('textarea#prompt-textarea')) return [composer];
+    if (selector === 'main, [role="main"]') return [main];
+    return [];
+  };
+
+  const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
+    CONFIG: { promptSubmitAckTimeoutMs: 4_000 },
+    DOM_PARSER: sandbox.ChatGptDomParserCore,
+    getTurnNodes() { return turns; },
+    turnKey() { return 'user-hidden'; },
+    turnRole() { return 'user'; },
+    visibleText(node) { return node.textContent; },
+  }));
+  const evidence = await commands.enterPrompt(prompt, { requestId: 'hidden-request', options: {} }, { kind: 'prompt' });
+  assert.equal(evidence.confirmed, true);
+  assert.equal(evidence.reason, 'new_user_turn');
+  assert.equal(evidence.turnKey, 'user-hidden');
+});
+
 test('steer acknowledgement uses a longer bounded proof window than an ordinary prompt', async () => {
   const { sandbox } = await bootstrapExtensionContentRuntime();
   const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
@@ -357,6 +463,8 @@ test('a proven unsubmitted passive prompt is rolled back instead of poisoning th
     return [];
   };
 
+  sandbox.setTimeout = globalThis.setTimeout;
+  sandbox.clearTimeout = globalThis.clearTimeout;
   const diagnostics = [];
   const commands = sandbox.ChatGptComposerCommands.createComposerCommands(composerDependencies({
     CONFIG: { promptSubmitAckTimeoutMs: 1_000 },
