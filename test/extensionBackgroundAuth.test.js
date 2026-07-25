@@ -17,6 +17,7 @@ async function loadBackground({ fetchImpl, tabHooks = {}, localInitial = {}, dow
   const modulePaths = [
     'tools/chrome-bridge-extension/shared/commandManifest.js',
     'tools/chrome-bridge-extension/shared/protocolV5Manifest.js',
+    'tools/chrome-bridge-extension/shared/tabClientIdentity.js',
     'tools/chrome-bridge-extension/background/stateV6Core.js',
     'tools/chrome-bridge-extension/background/stateV6LeaseReducer.js',
     'tools/chrome-bridge-extension/background/stateV6CommandReducer.js',
@@ -588,4 +589,39 @@ test('extension background starts a captured artifact download without navigatin
   });
   assert.deepEqual(JSON.parse(JSON.stringify(tabCalls.find((call) => call.type === 'downloads.download')?.options)), { url, saveAs: false });
   assert.equal(tabCalls.some((call) => call.type === 'tabs.update'), false);
+});
+
+test('extension background scopes cloned content client ids to the actual Chrome tab', async () => {
+  const { context, FakeWebSocket } = await loadBackground({
+    async fetchImpl() { return { ok: true, status: 200, async text() { return '{"ok":true}'; } }; },
+  });
+  const first = makePort(401);
+  const second = makePort(402);
+  context.chrome.runtime.onConnect.emit(first);
+  first.onMessage.emit({
+    type: 'bridge.connect', serverUrl: 'http://127.0.0.1:8080', token: 'good-token', clientId: 'ext-cloned-session',
+    page: { contentEpoch: 'content-401' },
+  });
+  context.chrome.runtime.onConnect.emit(second);
+  second.onMessage.emit({
+    type: 'bridge.connect', serverUrl: 'http://127.0.0.1:8080', token: 'good-token', clientId: 'ext-cloned-session',
+    page: { contentEpoch: 'content-402' },
+  });
+  await flushBackgroundQueue();
+
+  const [firstSocket, secondSocket] = FakeWebSocket.instances.slice(-2);
+  for (const socket of [firstSocket, secondSocket]) {
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit('open');
+  }
+  first.onMessage.emit({ type: 'bridge.payload', payload: { type: 'hello', clientId: 'ext-cloned-session', browserTabId: 401, url: 'https://chatgpt.com/' } });
+  second.onMessage.emit({ type: 'bridge.payload', payload: { type: 'hello', clientId: 'ext-cloned-session', browserTabId: 402, url: 'https://chatgpt.com/' } });
+  await flushBackgroundQueue();
+
+  const firstHello = JSON.parse(firstSocket.sent.find((entry) => JSON.parse(entry).messageType === 'transport.hello'));
+  const secondHello = JSON.parse(secondSocket.sent.find((entry) => JSON.parse(entry).messageType === 'transport.hello'));
+  assert.equal(firstHello.body.clientId, 'ext-cloned-session');
+  assert.equal(secondHello.body.clientId, 'ext-cloned-session');
+  assert.equal(firstHello.source.clientId, 'ext-cloned-session:tab:401');
+  assert.equal(secondHello.source.clientId, 'ext-cloned-session:tab:402');
 });

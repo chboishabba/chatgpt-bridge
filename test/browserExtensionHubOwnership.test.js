@@ -326,3 +326,27 @@ test('hub assigns a durable command identity to request-scoped prompt delivery',
     await clientConnection.close();
   }
 });
+
+test('hub keeps cloned content identities separate by authoritative Protocol 5 tab source', async () => {
+  const hub = new BrowserExtensionHub(null, { serverInstanceId: 'server-current' });
+  const first = await connectExtensionClient(hub, {
+    clientId: 'ext-cloned-session',
+    sourceClientId: 'ext-cloned-session:tab:41',
+    browserTabId: 41,
+    url: 'https://chatgpt.com/',
+  });
+  const second = await connectExtensionClient(hub, {
+    clientId: 'ext-cloned-session',
+    sourceClientId: 'ext-cloned-session:tab:42',
+    browserTabId: 42,
+    url: 'https://chatgpt.com/',
+  }, { server: first.server });
+  try {
+    const ids = hub.clients.map((client) => client.id).sort();
+    assert.deepEqual(ids, ['ext-cloned-session:tab:41', 'ext-cloned-session:tab:42']);
+    assert.deepEqual(hub.clients.map((client) => client.contentClientId), ['ext-cloned-session', 'ext-cloned-session']);
+  } finally {
+    await second.close();
+    await first.close();
+  }
+});

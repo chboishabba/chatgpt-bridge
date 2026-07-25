@@ -59,6 +59,7 @@ export function normalizeClientSession(payload = {}, fallback = null) {
 export function publicClientProjection(client, { selectedClientId = '', serverInstanceId = '' } = {}) {
   return {
     id: client.id,
+    contentClientId: client.contentClientId || '',
     transport: client.transport || 'unknown',
     runtime: client.runtime || '',
     ready: client.ready,

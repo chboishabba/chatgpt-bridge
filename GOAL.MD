@@ -27,6 +27,8 @@ The workflow v3 and Protocol 5 atomic-publication hard cut is implemented. Core 
 ## Workflow UX goals
 
 - Keep `/workflow` as the single normal interactive entry point.
+- Treat a requested fresh workflow chat as a dedicated tab-creation flow; persist only a concrete conversation binding, never the pseudo-session `new`.
+- Keep browser-client ownership tab-scoped even when Chrome clones a content base ID through `sessionStorage`.
 - Present exactly three user-facing presets over one workflow v3 reducer and shared services.
 - Treat passive observation as a subscription, not as a second watcher lifecycle.
 - Keep every required decision in one persisted `nextAction` contract.
@@ -46,7 +48,7 @@ The workflow v3 and Protocol 5 atomic-publication hard cut is implemented. Core 
 
 ## Verified in the current tree
 
-- Versions are bridge `6.3.11`, extension `2.3.10`, content runtime `4.3.9`, protocol `5`, and workflow schema `3`.
+- Versions are bridge `6.3.13`, extension `2.3.11`, content runtime `4.3.9`, protocol `5`, and workflow schema `3`.
 - Protocol 5 has one shared manifest/validator and no payload-kind inference or Protocol 4 compatibility routing.
 - Effect-backed commands have one physical terminal lifecycle, and terminal state plus exact outbox envelope commit atomically.
 - Background owns release; unproved cleanup quarantines the tab instead of blocking unrelated work.
@@ -64,7 +66,7 @@ The workflow v3 and Protocol 5 atomic-publication hard cut is implemented. Core 
 
 ## Remaining release work
 
-1. Reload extension `2.3.10` in a logged-in target browser profile.
+1. Reload extension `2.3.11` in a logged-in target browser profile.
 2. Run `npm run test:parser-fixture` and `npm run verify:release:live -- --reload-extension --capture-page-layout` to execute the authenticated Chromium parser/smoke/reasoning/steer/reload/ZIP/layout/workflow/quarantine matrix and retain its release report.
 3. Capture sanitized fixtures for any new DOM variant; the offline corpus already includes a required-ZIP fixture paired with a self-contained canonical request trace.
 4. Run `npm run verify:release -- --reload-extension --capture-page-layout` in a networked release environment to prove clean `npm ci`, all local gates, zero production audit findings, and the live browser matrix in one invocation.

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "source": "bridge-debug-full-2026-07-25T11-35-04Z.json",
+  "reviewedAt": "2026-07-25",
+  "observed": {
+    "bridgeVersion": "6.3.12",
+    "alternatingBrowserTabIds": [1863744636, 1863744670],
+    "sharedLogicalClientId": true,
+    "clientReplacedEvents": 8,
+    "clientClosedEvents": 18,
+    "reconnectIntervalMsApprox": 1500,
+    "requestedWorkflowChatMode": "new",
+    "requestSourceSessionId": "new",
+    "sessionApplyDesiredSessionId": "new",
+    "sessionApplyNewSession": false,
+    "terminalEffect": "uncertain",
+    "terminalCode": "PROMPT_SUBMISSION_UNCERTAIN_AFTER_RELOAD"
+  },
+  "requiredSimulatorContract": {
+    "clonedContentStorageAcrossTabs": true,
+    "serverClientIdentityIsTabScoped": true,
+    "freshWorkflowChatUsesDedicatedTab": true,
+    "freshWorkflowPromptDoesNotSelectPseudoSessionNew": true
+  }
+}

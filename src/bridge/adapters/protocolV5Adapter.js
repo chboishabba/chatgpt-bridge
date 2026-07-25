@@ -35,7 +35,15 @@ function sameOwner(owner, source) {
 
 function internalPayloadForEnvelope(envelope, body = {}) {
   const type = envelope.messageType;
-  if (type === ExtensionMessageType.TRANSPORT_HELLO) return { ...body, type: 'hello' };
+  if (type === ExtensionMessageType.TRANSPORT_HELLO) {
+    const contentClientId = String(body.clientId || '');
+    return {
+      ...body,
+      type: 'hello',
+      contentClientId,
+      clientId: String(envelope?.source?.clientId || contentClientId),
+    };
+  }
   if (type === ExtensionMessageType.TRANSPORT_PONG) return { ...body, type: 'pong' };
   if (type === ExtensionMessageType.TRANSPORT_DIAGNOSTIC) return { ...body, type: String(body.diagnosticType || body.type || 'diagnostic') };
   if (type === ExtensionMessageType.TAB_OBSERVATION) return { ...body, type: 'tab.observation' };

@@ -77,7 +77,7 @@ export class HubClientMessageRouter {
 
   #hello(client, payload, envelope) {
     const oldId = client.id;
-    const newId = typeof payload.clientId === 'string' && payload.clientId ? payload.clientId : oldId;
+    const newId = String(envelope?.source?.clientId || payload.clientId || oldId);
     if (newId !== oldId) {
       this.clients.delete(oldId);
       client.id = newId;
@@ -87,6 +87,7 @@ export class HubClientMessageRouter {
       if (this.getSelectedClientId() === oldId) this.setSelectedClientId(newId);
     }
     client.ready = true;
+    client.contentClientId = String(payload.contentClientId || payload.clientId || client.contentClientId || '');
     if (typeof client.quarantined !== 'boolean') client.quarantined = false;
     client.url = String(payload.url || '');
     const launchMetadata = browserLaunchMetadataFromUrl(client.url);

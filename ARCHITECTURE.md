@@ -6,14 +6,18 @@ The workflow v3 and Protocol 5 hard cut is implemented in the current tree. Prot
 
 Current versions:
 
-- bridge package: `6.3.11`;
-- extension package: `2.3.10`;
+- bridge package: `6.3.13`;
+- extension package: `2.3.11`;
 - content runtime: `4.3.9`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - workflow runtime schema: `3` only.
 
 Authenticated live-browser verification remains a release activity. A new ChatGPT DOM variant may require parser or executor adapter changes, but it must remain a local typed effect outcome and must not create another protocol classifier, lifecycle, terminal publisher, or release path.
+
+Chrome tab identity is a background-owned transport fact. A content-generated base client ID may be cloned through `sessionStorage`, so it is never authoritative for hub ownership. The background derives the Protocol 5 source client ID from the base ID plus the real Chrome `tabId`; the hub routes by that envelope source and exposes the base value only as diagnostics. Reloading one tab retains its scoped identity, while another tab with cloned page storage remains a separate client.
+
+A workflow fresh-chat request is also a tab-creation operation, not a pseudo-session selection. The interactive wizard opens one Bridge-owned root ChatGPT tab, addresses initialization to that exact scoped client, and persists a workflow binding only after a concrete conversation ID is observed. `new` and temporary `WEB:*` values are not valid stored bindings.
 
 ## Ownership model
 

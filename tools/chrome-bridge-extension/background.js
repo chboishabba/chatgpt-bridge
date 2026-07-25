@@ -19,6 +19,7 @@ import {
 } from './background/extensionReloadCoordinator.js';
 import { createTabController } from './background/tabController.js';
 import { checkBridgeAuth } from './background/authPreflight.js';
+import { tabScopedClientId } from './shared/tabClientIdentity.js';
 const connections = new Map();
 const backgroundEpoch = createRuntimeEpoch('background');
 const backgroundManifestVersion = String(chrome.runtime?.getManifest?.()?.version || 'unknown');
@@ -231,15 +232,18 @@ const {
 
 function connectWebSocket(port, config) {
   closeConnection(port, 'replace');
+  const tabId = port?.sender?.tab?.id ?? null;
+  const contentClientId = String(config.clientId || '');
   const state = {
     port,
     serverUrl: safeBridgeServerUrl(config.serverUrl) || 'http://127.0.0.1:8080',
     token: String(config.token || ''),
-    clientId: String(config.clientId || ''),
+    clientId: tabScopedClientId(contentClientId, tabId),
+    contentClientId,
     reconnectTimer: null,
     ws: null,
     closed: false,
-    tabId: port?.sender?.tab?.id ?? null,
+    tabId,
     contentEpoch: String(config.page?.contentEpoch || ''),
     connectionEpoch: createRuntimeEpoch('connection'),
     protocolReady: false, preHelloPayloads: [],

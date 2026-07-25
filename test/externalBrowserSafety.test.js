@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { safeExternalBrowserUrl } from '../src/bridge/externalBrowser.js';
 
-const maintenanceUrl = 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb/maintenance-reload.html?confirm=chatgpt-bridge-maintenance-reload-v1&expectedVersion=2.3.10';
+const maintenanceUrl = 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb/maintenance-reload.html?confirm=chatgpt-bridge-maintenance-reload-v1&expectedVersion=2.3.11';
 
 test('external browser helper permits only the confirmed extension maintenance page', () => {
   assert.equal(safeExternalBrowserUrl(maintenanceUrl, { allowExtensionMaintenance: true }), maintenanceUrl);

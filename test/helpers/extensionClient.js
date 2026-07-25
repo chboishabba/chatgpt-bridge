@@ -5,15 +5,18 @@ import { config } from '../../src/config.js';
 import { ExtensionMessageType, createExtensionEnvelope } from '../../src/bridge/protocol/v5.js';
 import { readBundledExtensionInfo } from '../../src/extensionStartup.js';
 
-export async function connectExtensionClient(hub, hello = {}) {
+export async function connectExtensionClient(hub, hello = {}, options = {}) {
   const bundledExtension = await readBundledExtensionInfo();
-  const server = http.createServer((_req, res) => {
+  const ownsServer = !options.server;
+  const server = options.server || http.createServer((_req, res) => {
     res.statusCode = 404;
     res.end();
   });
-  hub.attach(server);
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  if (ownsServer) {
+    hub.attach(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+  }
   const address = server.address();
   const token = encodeURIComponent(config.bridgeToken || '');
   const ws = new WebSocket(`ws://127.0.0.1:${address.port}/extension/ws?runtime=extension&token=${token}`, {
@@ -21,13 +24,15 @@ export async function connectExtensionClient(hub, hello = {}) {
   });
   await once(ws, 'open');
   let sequence = 0;
+  const sourceClientId = hello.sourceClientId || hello.clientId || 'test-extension';
   const source = () => ({
-    clientId: hello.clientId || 'test-extension',
+    clientId: sourceClientId,
     tabId: hello.browserTabId ?? 1,
     backgroundEpoch: 'test-background-epoch',
     contentEpoch: 'test-content-epoch',
     sequence: ++sequence,
   });
+  const { sourceClientId: _sourceClientId, ...helloOverrides } = hello;
   const helloPayload = {
     type: 'hello',
     clientId: hello.clientId || 'test-extension',
@@ -38,7 +43,7 @@ export async function connectExtensionClient(hub, hello = {}) {
     extensionBundleId: hello.extensionBundleId || bundledExtension.bundleId,
     clientVersion: hello.clientVersion || bundledExtension.contentVersion,
     extensionProtocolVersion: hello.extensionProtocolVersion ?? 5,
-    ...hello,
+    ...helloOverrides,
   };
   const helloRequestId = String(hello.activeRequest?.requestId || '');
   const helloRequest = helloRequestId ? {
@@ -98,6 +103,7 @@ export async function connectExtensionClient(hub, hello = {}) {
     },
     async close() {
       try { ws.close(); } catch {}
+      if (!ownsServer) return;
       hub.close();
       await new Promise((resolve) => server.close(resolve));
     },

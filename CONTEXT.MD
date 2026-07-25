@@ -6,14 +6,22 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.12`;
-- extension: `2.3.10`;
+- bridge package: `6.3.13`;
+- extension: `2.3.11`;
 - content runtime: `4.3.9`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - WebSocket endpoint: `/extension/ws`.
 
 No polling, page-context WebSocket, userscript transport, protocol downgrade, alternate request lifecycle, job API, or alternate interactive runtime remains.
+
+## 6.3.13 tab-scoped browser identity and interactive fresh-chat bootstrap
+
+- Chrome can clone `sessionStorage` when one ChatGPT tab opens another tab. The content-generated base ID is therefore diagnostic only; the extension background scopes the authoritative Protocol 5 source identity to the real Chrome `tabId`.
+- Reloading one tab preserves its tab-scoped identity, while two tabs that inherited the same base content ID remain distinct clients. The hub treats the Protocol 5 envelope source as authoritative and retains the base ID only as `contentClientId` diagnostics.
+- The interactive `/workflow` choice **Start a new chat** opens a dedicated Bridge-owned ChatGPT tab first. The initialization prompt targets that exact tab, and the workflow is pinned only after ChatGPT returns a concrete conversation ID.
+- The pseudo-session `new` is never selected through `session.apply` and is never persisted as a workflow binding. Bridge `6.3.13` requires extension `2.3.11` because earlier backgrounds could collapse cloned tabs into one reconnecting client.
+- Local parity deliberately gives every mock tab the same cloned base content ID. Production background, hub, bootstrap-helper, and full interactive wizard tests must still keep the tabs separate and bind the workflow to the newly opened tab.
 
 ## 6.3.12 successful-run mock parity
 

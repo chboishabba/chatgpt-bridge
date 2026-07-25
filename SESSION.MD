@@ -2,14 +2,22 @@
 
 ## Current release
 
-- Bridge package: `6.3.11`.
-- Extension manifest: `2.3.10`.
+- Bridge package: `6.3.13`.
+- Extension manifest: `2.3.11`.
 - Content runtime: `4.3.9`.
 - Extension protocol: `5` only.
 - Background persistence schema: `6` only.
 - Workflow runtime schema: `3` only.
 - Interactive dependency: exact `terlio.js@1.1.0`.
 - `package-lock.json` references public npm registry URLs only.
+
+## 6.3.13 tab-scoped identity and workflow fresh-tab bootstrap
+
+- The debug bundle `bridge-debug-full-2026-07-25T11-35-04Z.json.zip` proved that two Chrome tabs inherited the same content-generated ID from cloned `sessionStorage`. The hub alternated `client.replaced` and disconnect events because both WebSockets claimed one logical client.
+- Extension background `2.3.11` now scopes the authoritative Protocol 5 source ID with the actual Chrome `tabId`. The inherited content ID remains available only as `contentClientId` diagnostics. Reload preserves the same tab identity; cloned tabs remain separate.
+- Interactive `/workflow -> Start a new chat` no longer calls `sessions.new` in the selected tab. It opens a dedicated Bridge-owned tab, sends initialization to that exact tab, waits for a concrete conversation ID, and then stores a pinned workflow binding.
+- The local mock intentionally clones one base content ID into every tab. Production background VM, hub integration, bootstrap, and full wizard regression tests prove that this cannot reintroduce the reconnect loop or bind `new` as a session ID.
+- Bridge `6.3.13` rejects extension versions older than `2.3.11`; content runtime remains `4.3.9` because the ownership change is in background and server routing.
 
 ## 6.3.11 bounded ChatGPT transient-error retry
 

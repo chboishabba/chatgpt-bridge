@@ -12,6 +12,7 @@ import { MockChatGptStateMachine } from './state-machine.js';
 import { LOCAL_E2E_COMMAND_TYPE_SET } from './contract.js';
 import { effectEnvelopeOptions, effortsListResult, intelligenceApplyResult, modelsListResult, preparationEffectResult, steerEffectResult } from './command-results.js';
 import { removeCapturedBrowserDownload } from '../../../src/bridge/browserDownloads.js';
+import { tabScopedClientId } from '../../../tools/chrome-bridge-extension/shared/tabClientIdentity.js';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const text = (value) => String(value ?? '').trim();
@@ -57,7 +58,7 @@ function effectResultBody(step = {}, request = {}, result = {}) {
 }
 
 export class MockExtensionTab extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null, releaseDelayMs = 150, deliveryNoise = true } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null, releaseDelayMs = 150, deliveryNoise = true, contentClientId = '' } = {}) {
     super();
     if (!bridgeUrl) throw new TypeError('Mock extension tab requires bridgeUrl');
     this.bridgeUrl = String(bridgeUrl).replace(/\/$/, '');
@@ -69,7 +70,8 @@ export class MockExtensionTab extends EventEmitter {
     this.requestedUrl = String(requestedUrl || 'https://chatgpt.com/');
     this.active = active !== false;
     this.focused = this.active && focused === true;
-    this.clientId = `mock-extension-tab-${this.tabId}`;
+    this.contentClientId = text(contentClientId) || `mock-extension-${randomUUID()}`;
+    this.clientId = tabScopedClientId(this.contentClientId, this.tabId);
     this.backgroundEpoch = `mock-background-${randomUUID()}`;
     this.contentEpoch = `mock-content-${randomUUID()}`;
     this.sequence = 0;
@@ -113,7 +115,7 @@ export class MockExtensionTab extends EventEmitter {
   helloBody() {
     return {
       type: 'hello',
-      clientId: this.clientId,
+      clientId: this.contentClientId,
       runtime: 'extension',
       url: this.state.url,
       title: 'ChatGPT',
@@ -832,12 +834,13 @@ export class MockExtensionTab extends EventEmitter {
 }
 
 export class MockChatGptBrowser extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', pageOrigin = '', windowFocused = false } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', pageOrigin = '', windowFocused = false, contentClientId = '' } = {}) {
     super();
     this.bridgeUrl = String(bridgeUrl || '').replace(/\/$/, '');
     this.bridgeToken = String(bridgeToken || '');
     this.pageOrigin = String(pageOrigin || '').replace(/\/$/, '');
     this.windowFocused = windowFocused === true;
+    this.contentClientId = text(contentClientId) || `mock-extension-${randomUUID()}`;
     this.tabs = new Map();
     this.nextTabId = 100;
     this.nextDownloadId = 1;
@@ -933,6 +936,7 @@ export class MockChatGptBrowser extends EventEmitter {
       active,
       focused: active !== false && this.windowFocused,
       state,
+      contentClientId: this.contentClientId,
     });
     this.tabs.set(resolvedTabId, tab);
     tab.on('error', (error) => this.emit('error', error));

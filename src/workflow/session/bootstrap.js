@@ -1,6 +1,53 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { makeRequestId } from '../../protocol.js';
 import { workflowRequestEffort } from '../support/workflowIntelligence.js';
+
+
+function concreteWorkflowSessionId(response = {}) {
+  const candidates = [
+    response?.session?.id,
+    response?.session?.sessionId,
+    response?.sessionId,
+    response?.url,
+  ];
+  for (const candidate of candidates) {
+    const raw = String(candidate || '').trim();
+    if (!raw || /^new$/i.test(raw) || /^web:/i.test(raw)) continue;
+    try {
+      const parsed = new URL(raw, 'https://chatgpt.com');
+      const fromUrl = parsed.pathname.match(/^\/c\/([^/?#]+)/)?.[1] || '';
+      if (fromUrl && !/^web:/i.test(fromUrl)) return fromUrl;
+      if (/^https?:/i.test(raw)) continue;
+    } catch {}
+    const normalized = raw.replace(/^\/+c\//, '').replace(/[/?#].*$/, '');
+    if (normalized && !/^new$/i.test(normalized) && !/^web:/i.test(normalized)) return normalized;
+  }
+  return '';
+}
+
+function freshWorkflowClient(client = {}) {
+  const sessionId = concreteWorkflowSessionId({ session: client.session, url: client.url });
+  return Boolean(client?.id) && !sessionId;
+}
+
+export async function openFreshWorkflowChatTab({ bridge, sourceClientId = '', timeoutMs = 30_000 } = {}) {
+  if (!bridge?.openBrowserTab) throw new Error('Starting a fresh workflow chat requires browser tab control');
+  const launchToken = `bridge-workflow-${makeRequestId()}`;
+  const opened = await bridge.openBrowserTab({
+    url: 'https://chatgpt.com/',
+    active: true,
+    launchToken,
+    sourceClientId: sourceClientId || undefined,
+    timeoutMs,
+    allowSystemFallback: true,
+  });
+  const client = opened?.client || null;
+  if (!freshWorkflowClient(client)) {
+    throw new Error('Bridge opened a workflow tab, but it was not a fresh ChatGPT chat');
+  }
+  return { ...opened, launchToken, client };
+}
 
 export function workflowInstructionText(workflow = {}) {
   const manifest = workflow.resultProtocol?.manifest || 'bridge-result.json';
@@ -69,10 +116,8 @@ export async function bootstrapWorkflowChat({ workflow, bridge, fileStore, proje
     useGitignore: true,
   });
   const instructions = await createWorkflowInstructionAttachment({ workflow, fileStore, dataDir });
-  const created = await bridge.newSession({ sourceClientId: sourceClientId || undefined });
-  const session = created?.session || created?.current || created;
-  const sessionId = String(session?.id || session?.sessionId || '').trim();
-  if (!sessionId) throw new Error('ChatGPT did not return a session id for workflow bootstrap');
+  const opened = await openFreshWorkflowChatTab({ bridge, sourceClientId });
+  const bootstrapClientId = String(opened.client.id || '');
   const response = await bridge.sendRequest({
     message: [
       'This chat is connected to Bridge.',
@@ -82,12 +127,16 @@ export async function bootstrapWorkflowChat({ workflow, bridge, fileStore, proje
       'Confirm when you are ready.',
     ].join('\n'),
     attachments: [pack.file.id, instructions.id],
-    sessionId,
-    sourceClientId: sourceClientId || undefined,
+    sessionId: '',
+    newSession: false,
+    sourceClientId: bootstrapClientId,
+    autoOpenTab: false,
     effort: workflowRequestEffort(workflow),
     fullResponse: true,
   });
   if (!String(response.answer || '').trim()) throw new Error('ChatGPT did not acknowledge workflow initialization');
+  const sessionId = concreteWorkflowSessionId(response);
+  if (!sessionId) throw new Error('ChatGPT did not create a concrete conversation for workflow bootstrap');
   await projectService.markSnapshotUploaded({
     cwd: workflow.projectRoot,
     projectId: pack.project.id,
@@ -99,7 +148,9 @@ export async function bootstrapWorkflowChat({ workflow, bridge, fileStore, proje
   });
   return {
     sessionId,
-    sourceClientId: response.sourceClientId || sourceClientId || '',
+    sourceClientId: response.sourceClientId || bootstrapClientId,
+    browserTabId: opened.client.browserTabId ?? null,
+    launchToken: opened.launchToken || '',
     snapshotId: pack.snapshotId,
     fingerprint: pack.snapshotId,
     projectFileId: pack.file.id,
