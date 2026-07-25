@@ -80,6 +80,7 @@ function turnRole(turn) {
   const msg = turn.querySelector?.('[data-message-author-role]');
   return msg?.getAttribute('data-message-author-role') || turn.getAttribute?.('data-message-author-role') || '';
 }
+
 function getAssistantNodes() {
   return Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
 }
@@ -88,13 +89,18 @@ function getAssistantNodeFromTurn(turn) {
   if (turnRole(turn) === 'assistant') return turn;
   return getFinalAssistantNode(turn);
 }
+const USER_TURN_STATE_FACTORY = globalThis.ChatGptUserTurnState;
+if (!USER_TURN_STATE_FACTORY) throw new Error('ChatGPT user-turn state module was not loaded before turnSnapshots.js');
+const { classifyUserTurnError, readSubmittedUserTurnError, readUserTurnPromptText } = USER_TURN_STATE_FACTORY.createUserTurnState({
+  getTurnNodes, isVisible, normalizeText, turnKey, turnRole, visibleText,
+});
 function requestTurnRecords({ includeText = false } = {}) {
   return getTurnNodes().map((turn, index) => ({
     turn,
     index,
     key: turnKey(turn, index),
     role: turnRole(turn),
-    text: includeText ? visibleText(turn) : '',
+    text: includeText ? (turnRole(turn) === 'user' ? readUserTurnPromptText(turn) : visibleText(turn)) : '',
   }));
 }
 function resetAssistantAnchorAfterSteer(request, candidate) {
@@ -426,13 +432,21 @@ function readAssistantSnapshot(requestOrBaseline) {
   if (requestOrBaseline && typeof requestOrBaseline === 'object') {
     const request = requestOrBaseline;
     const selected = findAssistantTurnAfterSubmittedUser(request);
-    if (selected.node) return readAssistantNodeSnapshot(selected.node, { turnCount: selected.turns.length, reason: selected.reason, turnKey: selected.key || '', turnIndex: selected.index ?? -1, captureSourceHtml: Boolean(request.options?.captureDomTimeline) });
+    if (selected.node) return readAssistantNodeSnapshot(selected.node, { turnCount: selected.turns.length, reason: selected.reason, turnKey: selected.key || '', turnIndex: selected.index ?? -1, captureSourceHtml: Boolean(request.options?.captureDomTimeline), request });
 
-    // Before the submitted user turn is visible, do not fall back to an older
-    // assistant response. Virtualized ChatGPT DOM can reorder text and keeps
-    // old assistant nodes around; old fallbacks caused stale answers and hangs.
+    // A failed ChatGPT submission is rendered on the submitted user turn and
+    // may never create an assistant node. Preserve that exact boundary instead
+    // of falling back to an older response or waiting for liveness expiry.
+    const userTurnError = readSubmittedUserTurnError(request);
     const nodes = getAssistantNodes();
-    return { answer: '', thinking: '', progress: '', progressItems: [], raw: '', count: nodes.length, format: 'none', artifacts: [], reason: selected.reason, turnCount: selected.turns.length };
+    return {
+      answer: '', thinking: '', progress: '', progressItems: [], raw: '', count: nodes.length,
+      format: 'none', artifacts: [], reason: userTurnError.hasError ? 'submitted_user_turn_error' : selected.reason,
+      turnCount: selected.turns.length, phase: userTurnError.hasError ? DOM_PARSER.PHASE.ERROR : DOM_PARSER.PHASE.ASSISTANT_PLACEHOLDER,
+      hasError: userTurnError.hasError, errorText: userTurnError.text, errorCode: userTurnError.code,
+      errorKind: userTurnError.kind, errorRetryable: userTurnError.retryable,
+      errorUserTurnKey: userTurnError.userTurnKey,
+    };
   }
 
   const nodes = getAssistantNodes();
@@ -720,37 +734,11 @@ function readAssistantVisibleBlocks(turn, finalNode) {
   return grouped.filter((block) => block.final || block.text);
 }
 
-function responseActionBarVisible(turn) {
-  if (!turn?.querySelectorAll) return false;
-  const copy = Array.from(turn.querySelectorAll('[data-testid="copy-turn-action-button"]')).find(isVisible);
-  if (copy) return true;
-  return Array.from(turn.querySelectorAll('[role="group"][aria-label], [data-testid*="turn-action" i], [data-testid*="message-action" i]'))
-    .some((group) => isVisible(group) && /action|response|message|действ|ответ/i.test(`${group.getAttribute('aria-label') || ''} ${group.getAttribute('data-testid') || ''}`));
-}
-
-function readConfirmationState(turn) {
-  const root = turn?.closest?.('main') || turn?.closest?.('[role="main"]') || turn || findChatMain();
-  if (!root?.querySelectorAll) return false;
-  return Array.from(root.querySelectorAll('[role="dialog"], [role="alertdialog"], [data-testid*="confirm" i], [data-testid*="approval" i]'))
-    .some((element) => {
-      if (!isVisible(element)) return false;
-      const buttons = Array.from(element.querySelectorAll('button, [role="button"]')).filter(isVisible);
-      const text = `${visibleText(element)} ${buttons.map(buttonSignalText).join(' ')}`;
-      return buttons.length > 0 && /confirm|allow|approve|continue|разреш|подтверд|одобр/i.test(text);
-    });
-}
-
-function readErrorState(turn) {
-  const root = turn?.closest?.('main') || turn?.closest?.('[role="main"]') || findChatMain() || turn;
-  if (!root?.querySelectorAll) return { hasError: false, text: '' };
-  const candidate = Array.from(root.querySelectorAll('[role="alert"], [data-testid*="error" i], [data-testid*="rate-limit" i]'))
-    .find((element) => {
-      if (!isVisible(element)) return false;
-      const text = visibleText(element);
-      return /error|failed|something went wrong|rate limit|try again|ошиб|не удалось|лимит/i.test(text);
-    });
-  return { hasError: Boolean(candidate), text: candidate ? visibleText(candidate) : '' };
-}
+const TURN_UI_SIGNALS_FACTORY = globalThis.ChatGptTurnUiSignals;
+if (!TURN_UI_SIGNALS_FACTORY) throw new Error('ChatGPT turn UI signals were not loaded before turnSnapshots.js');
+const { readConfirmationState, readErrorState, responseActionBarVisible } = TURN_UI_SIGNALS_FACTORY.createTurnUiSignals({
+  buttonSignalText, findChatMain, isVisible, visibleText,
+});
 
 function unknownTurnTestIds(turn) {
   if (!turn?.querySelectorAll) return [];
@@ -904,7 +892,9 @@ function readAssistantNodeSnapshot(node, meta = {}) {
   const hasActiveTool = progressItems.some((item) => item.kind === 'tool_status' && item.active && item.visible);
   const needsContinue = Boolean(findContinueButton(finalizationControlRoots(getActiveRequest(), { turnKey: meta.turnKey || turnKey(turn, meta.turnIndex ?? -1) })));
   const needsConfirmation = readConfirmationState(parseRoot);
-  const errorState = readErrorState(parseRoot);
+  const assistantErrorState = readErrorState(parseRoot);
+  const submittedUserError = readSubmittedUserTurnError(meta.request || getActiveRequest());
+  const errorState = submittedUserError.hasError ? submittedUserError : assistantErrorState;
   const failedArtifacts = artifacts.filter((artifact) => String(artifact.phase || '').toUpperCase() === 'FAILED');
   const artifactErrorText = failedArtifacts.map((artifact) => artifact.errorText || artifact.name || artifact.id).filter(Boolean).join('; ');
   const testIds = blockTestIds(parseRoot);
@@ -965,6 +955,10 @@ function readAssistantNodeSnapshot(node, meta = {}) {
     needsContinue,
     hasError: errorState.hasError || failedArtifacts.length > 0,
     errorText: errorState.text || artifactErrorText,
+    errorCode: errorState.code || (failedArtifacts.length ? 'ARTIFACT_FAILED' : ''),
+    errorKind: errorState.kind || (failedArtifacts.length ? 'artifact_failed' : ''),
+    errorRetryable: Boolean(errorState.retryable),
+    errorUserTurnKey: String(errorState.userTurnKey || ''),
     conversationId: conversationIdFromUrl(location.href) || '',
     unknownTestIds: unknownTurnTestIds(parseRoot),
   };
@@ -980,6 +974,9 @@ function readAssistantNodeSnapshot(node, meta = {}) {
       turnRole,
       getAssistantNodes,
       getAssistantNodeFromTurn,
+      readUserTurnPromptText,
+      classifyUserTurnError,
+      readSubmittedUserTurnError,
       waitForSubmittedUserTurnAnchor,
       refreshRequestTurnAnchors,
       readLatestAssistantSnapshot,

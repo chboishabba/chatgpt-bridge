@@ -236,6 +236,10 @@ test('mock ChatGPT keeps the reload scenario active past the proved-boundary wai
   assert.equal(state.generating, true);
   assert.equal(state.outputSnapshot().answer, '');
   await generation;
+  assert.equal(state.outputSnapshot().answer, '');
+  assert.equal(state.turns.find((turn) => turn.role === 'user')?.errorCode, 'CHATGPT_TRANSIENT_REQUEST_ERROR');
+  state.appendUser(prompt, { requestId: 'reload-local', leaseId: 'lease-local', ownerServerInstanceId: 'server-local', responseEpoch: 1 });
+  await state.generate(prompt);
   assert.match(state.outputSnapshot().answer, new RegExp(`${marker}$`));
 });
 

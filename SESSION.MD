@@ -2,14 +2,21 @@
 
 ## Current release
 
-- Bridge package: `6.3.10`.
-- Extension manifest: `2.3.9`.
-- Content runtime: `4.3.8`.
+- Bridge package: `6.3.11`.
+- Extension manifest: `2.3.10`.
+- Content runtime: `4.3.9`.
 - Extension protocol: `5` only.
 - Background persistence schema: `6` only.
 - Workflow runtime schema: `3` only.
 - Interactive dependency: exact `terlio.js@1.1.0`.
 - `package-lock.json` references public npm registry URLs only.
+
+## 6.3.11 bounded ChatGPT transient-error retry
+
+- A submitted user turn that contains the exact ChatGPT error banner “Что-то пошло не так. Попробуйте еще раз.” or “Something went wrong. Please try again.” is parsed separately from the prompt text and becomes `CHATGPT_TRANSIENT_REQUEST_ERROR`.
+- Retry is permitted only after the exact failed user-turn key is proved inside the current lease. It stays in the same conversation, advances one canonical response epoch, and does not repeat session selection.
+- Default retry delays are 1s, 2s, and 4s, bounded by `CHATGPT_TRANSIENT_ERROR_MAX_RETRIES`, `CHATGPT_TRANSIENT_ERROR_RETRY_BASE_MS`, and `CHATGPT_TRANSIENT_ERROR_RETRY_MAX_MS`. Exhaustion produces `CHATGPT_TRANSIENT_ERROR_RETRY_EXHAUSTED`.
+- The mock reproduces the real E2E 47 shape: the user turn exists, the localized error banner is outside the prompt bubble, no successful assistant response is accepted, and the next response epoch succeeds after backoff.
 
 ## 6.3.10 hidden-tab submission and lease settlement
 

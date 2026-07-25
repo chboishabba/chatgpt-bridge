@@ -255,6 +255,7 @@ export class MockChatGptStateMachine {
     this.lastProjectFiles = [];
     this.lastWorkflowContext = null;
     this.attachments = [];
+    this.transientRequestFailures = new Set();
   }
 
   get session() { return this.sessions.get(this.sessionId); }
@@ -445,6 +446,30 @@ export class MockChatGptStateMachine {
     }
 
     if (!isCurrentGeneration()) return turn;
+    const effectiveRequest = request || this.activeRequest || null;
+    const transientFailureKey = String(effectiveRequest?.requestId || effectiveRequest?.id || '') || hash(prompt);
+    const shouldFailTransiently = /98765431 is prime/i.test(String(prompt || ''))
+      && /reload/i.test(String(effectiveRequest?.requestId || effectiveRequest?.id || ''))
+      && Number(effectiveRequest?.responseEpoch || 0) === 0
+      && !this.transientRequestFailures.has(transientFailureKey);
+    if (shouldFailTransiently) {
+      this.transientRequestFailures.add(transientFailureKey);
+      const submittedUser = [...this.turns].reverse().find((candidate) => candidate.role === 'user');
+      if (submittedUser) {
+        submittedUser.errorText = 'Что-то пошло не так. Попробуйте еще раз.';
+        submittedUser.errorCode = 'CHATGPT_TRANSIENT_REQUEST_ERROR';
+        submittedUser.errorKind = 'transient_request_error';
+        submittedUser.errorRetryable = true;
+      }
+      turn.text = '';
+      turn.final = true;
+      this.generating = false;
+      this.steerReady = false;
+      this.phase = 'error';
+      this.revision += 1;
+      await onChange('transient-request-error');
+      return turn;
+    }
     turn.text = plan.answer;
     turn.progressItems = Array.isArray(plan.progressItems) ? plan.progressItems.map((item) => ({ ...item })) : turn.progressItems;
     turn.artifacts = plan.artifacts || [];

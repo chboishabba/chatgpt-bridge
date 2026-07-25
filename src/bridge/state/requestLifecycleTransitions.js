@@ -115,6 +115,54 @@ export function reduceRequestLifecycleTransition(state, event) {
         effects: [], deadlines: [], diagnostics: [],
       };
     }
+    case RequestEventType.PROMPT_RETRY_ACCEPTED: {
+      const previous = state.response || { epoch: 0, history: [] };
+      const retry = state.responseRetry || {};
+      const previousResponseEpoch = Math.max(0, Number(data.previousResponseEpoch ?? previous.epoch) || 0);
+      const targetResponseEpoch = Math.max(0, Number(data.targetResponseEpoch ?? (previousResponseEpoch + 1)) || 0);
+      const attempt = Math.max(1, Number(data.retryAttempt ?? retry.scheduledAttempt) || 1);
+      if (previousResponseEpoch !== Math.max(0, Number(previous.epoch) || 0)
+          || targetResponseEpoch !== previousResponseEpoch + 1
+          || attempt !== Math.max(1, Number(retry.scheduledAttempt) || 1)) {
+        const diagnostics = [{
+          code: 'prompt_retry_response_epoch_mismatch',
+          message: `Rejected prompt retry transition ${previousResponseEpoch}->${targetResponseEpoch} attempt ${attempt}`,
+          data,
+        }];
+        return { state: appendDiagnostics(state, diagnostics), effects: [], deadlines: [], diagnostics, accepted: false };
+      }
+      return {
+        state: updateProgressTimestamp(applyLifecyclePatch({
+          ...state,
+          submission: SubmissionState.SUBMITTED,
+          response: {
+            epoch: targetResponseEpoch,
+            userTurnKey: String(data.userTurnKey || ''),
+            startedAt: at,
+            history: [...(previous.history || []), {
+              epoch: previous.epoch,
+              userTurnKey: previous.userTurnKey || '',
+              endedAt: at,
+              outcome: 'chatgpt_transient_error',
+            }].slice(-20),
+          },
+          responseRetry: {
+            ...retry,
+            attempts: attempt,
+            scheduledAttempt: 0,
+            status: 'idle',
+            dueAt: 0,
+            failedUserTurnKey: '',
+          },
+          generation: GenerationState.IDLE,
+          blocker: RequestBlocker.NONE,
+          output: OutputState.NONE,
+          completion: { ...state.completion, pending: false, requestedAt: 0, deadlineAt: 0, probeAttempt: 0, nextProbeAt: 0, evidence: null },
+          artifact: { ...state.artifact, status: state.artifact.required ? ArtifactState.PENDING : ArtifactState.NOT_EXPECTED, count: 0 },
+        }, { lifecycle: RequestLifecycle.AWAITING_ASSISTANT }), event),
+        effects: [], deadlines: [], diagnostics: [],
+      };
+    }
     case RequestEventType.OBSERVATION_UPDATED:
       return applyObservation(state, event);
     case RequestEventType.OUTPUT_UPDATED: {
@@ -176,6 +224,39 @@ export function reduceRequestLifecycleTransition(state, event) {
           },
         },
       };
+      if (kind === RequestDeadlineKind.RESPONSE_RETRY) {
+        const retry = state.responseRetry || {};
+        const attempt = Math.max(1, Number(data.attempt ?? retry.scheduledAttempt) || 1);
+        if (retry.status !== 'scheduled' || attempt !== Math.max(1, Number(retry.scheduledAttempt) || 1)) {
+          const diagnostics = [{ code: 'stale_response_retry_deadline', message: 'Ignored stale ChatGPT response retry deadline', data }];
+          return { state: appendDiagnostics(withDeadline, diagnostics), effects: [], deadlines: [], diagnostics, accepted: false };
+        }
+        return {
+          state: appendDiagnostics({
+            ...withDeadline,
+            responseRetry: { ...retry, status: 'dispatching', dueAt: 0 },
+          }, [{
+            code: 'chatgpt_transient_error_retry_dispatched',
+            message: `Dispatching ChatGPT response retry ${attempt}/${retry.maxRetries}`,
+            data,
+          }]),
+          effects: [{
+            id: `prompt-response-retry:${state.requestId}:${attempt}:${event.eventId}`,
+            type: RequestEffectType.PROMPT_RESPONSE_RETRY,
+            data: {
+              requestId: state.requestId,
+              attempt,
+              failedUserTurnKey: String(retry.failedUserTurnKey || data.failedUserTurnKey || ''),
+              previousResponseEpoch: Math.max(0, Number(state.response?.epoch) || 0),
+              targetResponseEpoch: Math.max(0, Number(state.response?.epoch) || 0) + 1,
+              errorCode: String(retry.lastErrorCode || 'CHATGPT_TRANSIENT_REQUEST_ERROR'),
+              errorMessage: String(retry.lastErrorMessage || ''),
+            },
+          }],
+          deadlines: [],
+          diagnostics: [],
+        };
+      }
       if (kind === RequestDeadlineKind.FORCED_SNAPSHOT) {
         const effectId = String(data.effectId || `forced-snapshot:${state.requestId}:${event.eventId}`);
         return {

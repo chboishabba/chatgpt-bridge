@@ -49,12 +49,17 @@
       waitForSubmittedUserTurnAnchor,
       pagePresence,
       readIntelligenceState,
+      readSubmittedUserTurnError,
       resumeBoundaryTimeoutMs = 2_500,
     } = deps;
     const support = deps.requestCommandSupport || {};
     const { settleEffectCommandWithoutExecution } = support;
     if (typeof settleEffectCommandWithoutExecution !== 'function') throw new TypeError('Prompt commands require request command support');
-
+    const RESPONSE_RETRY_FACTORY = globalThis.ChatGptRequestResponseRetry;
+    if (!RESPONSE_RETRY_FACTORY) throw new Error('ChatGPT request response retry module was not loaded before requestPromptCommands.js');
+    const responseRetryApi = RESPONSE_RETRY_FACTORY.createRequestResponseRetry({
+      diagnostic, getAssistantNodes, getTurnNodes, readSubmittedUserTurnError, settleEffectCommandWithoutExecution, simpleHash, turnKey,
+    });
     async function handlePromptSend(payload) {
       let activeRequest = getActiveRequest();
       const requestId = String(payload.requestId || '');
@@ -71,7 +76,6 @@
         diagnostic('prompt.execution.invalid_payload', { commandId, requestId, reason: 'empty_prompt_and_attachments' });
         return;
       }
-
       const executionPlan = payload.executionPlan && typeof payload.executionPlan === 'object'
         ? payload.executionPlan
         : null;
@@ -95,15 +99,17 @@
       }
       const currentStep = planSteps[startAtIndex];
       const currentStepKind = String(currentStep?.kind || '');
-      const continuingExecution = Boolean(
-        activeRequest
-        && activeRequest.requestId === requestId
-        && payload.executionStepOnly === true
-        && payload.continuationOfEffectId
-        && !activeRequest.sentAt
-        && !activeRequest.submittedUserTurnKey
-      );
-
+      const retryPreparation = await responseRetryApi.prepareCommand(activeRequest, payload, {
+        commandId, currentStep, currentStepKind, message, requestId, startAtIndex,
+      });
+      if (retryPreparation.rejected) return;
+      const responseRetry = retryPreparation.retry;
+      let continuingExecution = Boolean(retryPreparation.accepted
+        || (activeRequest && activeRequest.requestId === requestId && payload.executionStepOnly === true
+          && payload.continuationOfEffectId && !activeRequest.sentAt && !activeRequest.submittedUserTurnKey));
+      if (retryPreparation.accepted) diagnostic('prompt.response_retry.started', {
+        requestId, commandId, retryAttempt: retryPreparation.retryAttempt, ...retryPreparation.evidence,
+      });
       if (activeRequest) {
         if (activeRequest.requestId === requestId && !continuingExecution) {
           scheduleTabObservation('prompt.duplicate_delivery', 0);
@@ -134,7 +140,6 @@
           return;
         }
       }
-
       let request = activeRequest;
       if (!continuingExecution) {
         request = REQUEST_STATE.createRequestState(requestId, options, payload.ownerServerInstanceId || payload.serverInstanceId || getConnectedServerInstanceId(), payload.leaseId, { commandId, responseEpoch: payload.responseEpoch });
@@ -247,7 +252,14 @@
           await waitForSubmittedUserTurnAnchor(request, submissionBaseline, { kind: 'prompt', replace: false, timeoutMs: 5_000 });
           refreshRequestTurnAnchors(request);
           if (!request.submittedUserTurnKey) setRequestPhase(request, 'waiting_for_user_turn', { meaningful: false });
-        }, { effect: currentStep });
+          return {
+            submittedUserTurnKey: String(request.submittedUserTurnKey || ''),
+            submittedUserTurnIndex: Number.isInteger(request.submittedUserTurnIndex) ? request.submittedUserTurnIndex : -1,
+            retryAttempt: Math.max(0, Number(responseRetry?.attempt) || 0),
+            previousResponseEpoch: Math.max(0, Number(responseRetry?.previousResponseEpoch) || 0),
+            targetResponseEpoch: Math.max(0, Number(responseRetry?.targetResponseEpoch ?? request.responseEpoch) || 0),
+          };
+        }, { effect: currentStep, result: (result) => result });
         scheduleTabObservation('prompt.submitted', 0);
         diagnostic('prompt.sent', { requestId });
         emitChatEvent(request, 'prompt.sent', { attachmentCount: attachments.length });

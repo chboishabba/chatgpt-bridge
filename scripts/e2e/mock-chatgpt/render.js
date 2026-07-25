@@ -62,6 +62,9 @@ function renderComposerAttachments(attachments = []) {
 
 function renderTurn(turn = {}, index = 0) {
   const role = turn.role === 'assistant' ? 'assistant' : 'user';
+  const userError = role === 'user' && turn.errorText
+    ? `<div class="flex w-full flex-col items-end justify-between gap-2"><div class="flex max-w-[70%] flex-row-reverse items-start gap-1 text-start text-sm text-orange-600"><svg aria-hidden="true"></svg>${escapeHtml(turn.errorText)}</div></div>`
+    : '';
   const reasoning = !turn.final && Array.isArray(turn.progressItems) && turn.progressItems.length
     ? `<div class="reasoning" data-testid="cot-v5-${escapeHtml(turn.key)}" role="status" aria-live="polite">${turn.progressItems.map((item) => `<div data-progress-id="${escapeHtml(item.logicalId || item.id || '')}" data-state="${escapeHtml(item.state || 'active')}">${escapeHtml(item.text || '')}</div>`).join('')}</div>`
     : '';
@@ -70,6 +73,7 @@ function renderTurn(turn = {}, index = 0) {
     ${reasoning}
     <div class="turn-body" data-message-author-role="${role}" data-message-id="${escapeHtml(turn.messageId || turn.key)}" data-message-model-slug="gpt-mock">
       <div class="markdown prose">${role === 'assistant' ? renderMarkdown(turn.text || '') : `<p>${escapeHtml(turn.text || '')}</p>`}</div>
+      ${userError}
       ${artifacts}
       ${role === 'assistant' && turn.final ? '<div role="group" aria-label="Response actions"><button data-testid="copy-turn-action-button" aria-label="Copy response">Copy</button><button data-testid="good-response-turn-action-button" aria-label="Good response">Good</button><button data-testid="bad-response-turn-action-button" aria-label="Bad response">Bad</button></div>' : ''}
     </div>

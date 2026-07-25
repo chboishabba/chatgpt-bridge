@@ -333,4 +333,9 @@ Each emitted observation contains an `observerId` and a monotonically increasing
 Temporary document/composer loss during React replacement is reported only after a short degraded-state stabilization window. It is not itself a terminal request failure.
 
 The request adapter must not project historical tab content onto a newly created request. Request-specific generation, blocker, output, artifact, and error facts are accepted only after prompt binding is established or when the observation explicitly names that request. Conversation/request mismatch becomes fatal only after binding. The observer itself never finalizes a request, evaluates the required-output contract, runs workflow actions, or clicks UI controls.
+## Submitted user-turn transient errors
+
+A ChatGPT-owned error banner may appear inside the user-turn container but outside the prompt bubble. The parser must read the prompt only from the user-message bubble and report the banner separately as `CHATGPT_TRANSIENT_REQUEST_ERROR`. Localized Russian and English forms are recognized only from the exact submitted turn.
+
+This evidence permits a bounded response retry because the initial write is already proved by the user-turn key. It does not authorize replay after an uncertain click. Every retry stays in the same lease/conversation, increments `responseEpoch`, and must re-prove the failed turn and error before content executes the new prompt step.
 

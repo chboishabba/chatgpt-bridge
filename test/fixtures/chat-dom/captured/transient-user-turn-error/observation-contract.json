@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "run": "last-real-e2e(47)",
+    "scenario": "reload-mid-request",
+    "html": "01-russian-error.html"
+  },
+  "expected": {
+    "userTurnKey": "36d44863-b0e9-4a8b-b2f3-58a4e2c548bd",
+    "prompt": "Analyze whether 98765431 is prime. Show a short verification, then finish with exactly RELOAD_RECOVERED_BRIDGE_E2E_1122A9F3EBFD on its own final line.",
+    "errorText": "Что-то пошло не так. Попробуйте еще раз.",
+    "errorCode": "CHATGPT_TRANSIENT_REQUEST_ERROR",
+    "errorKind": "transient_request_error",
+    "retryable": true,
+    "assistantTurnCreated": false
+  }
+}

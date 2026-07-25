@@ -106,15 +106,20 @@ function preconditionsFor(kind, { request, message, options, attachments }) {
   return common;
 }
 
-export function createPromptExecutionPlan({ request, message = '', options = {}, attachments = [] } = {}) {
+function createExecutionPlan({ request, message = '', options = {}, attachments = [], includeSessionApply = true } = {}) {
   if (!request?.requestId || !request?.leaseId || !request?.ownerServerInstanceId) {
     throw new Error('Prompt execution plan requires a complete request identity');
   }
-  const kinds = ['page.ready.initial', 'session.apply', 'model.apply'];
+  const kinds = ['page.ready.initial'];
+  if (includeSessionApply) kinds.push('session.apply');
+  kinds.push('model.apply');
   if (Array.from(attachments || []).length) kinds.push('attachments.upload');
   kinds.push('prompt.submit');
   const steps = kinds.map((kind, index) => {
-    const logicalId = `${request.requestId}:${kind}`;
+    const responseEpoch = Math.max(0, Number(request.responseEpoch) || 0);
+    const logicalId = responseEpoch > 0
+      ? `${request.requestId}:${kind}:responseEpoch:${responseEpoch}`
+      : `${request.requestId}:${kind}`;
     const attempt = 1;
     const preconditions = Object.freeze(preconditionsFor(kind, { request, message, options, attachments }));
     return Object.freeze({
@@ -136,6 +141,14 @@ export function createPromptExecutionPlan({ request, message = '', options = {},
     startAtStepId: steps[0]?.stepId || '',
     steps: Object.freeze(steps),
   });
+}
+
+export function createPromptExecutionPlan(options = {}) {
+  return createExecutionPlan({ ...options, includeSessionApply: true });
+}
+
+export function createPromptResponseRetryPlan(options = {}) {
+  return createExecutionPlan({ ...options, includeSessionApply: false });
 }
 
 export function resumePromptExecutionPlan(plan, {

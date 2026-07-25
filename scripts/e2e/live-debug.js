@@ -221,6 +221,12 @@ function browserDebugMessage(event = {}) {
       return ['ok', phaseScope, 'Prompt submission was already confirmed; no additional click is needed', { ...fields, attempt: data.attempt, kind: data.kind }];
     case 'prompt.sent':
       return ['ok', phaseScope, 'Prompt submission confirmed by ChatGPT DOM', { ...fields, attachments: data.attachmentCount }];
+    case 'request.retry.scheduled':
+      return ['retry', phaseScope, 'ChatGPT reported a transient request failure; waiting before a safe retry', { ...fields, attempt: data.attempt, maxRetries: data.maxRetries, delayMs: data.delayMs, errorCode: data.errorCode }];
+    case 'request.retry.dispatched':
+      return ['action', phaseScope, 'Repeating the proven failed ChatGPT request', { ...fields, attempt: data.attempt, previousResponseEpoch: data.previousResponseEpoch, targetResponseEpoch: data.targetResponseEpoch }];
+    case 'request.retry.accepted':
+      return ['ok', phaseScope, 'ChatGPT accepted the repeated request on a new response boundary', { ...fields, attempt: data.retryAttempt, targetResponseEpoch: data.targetResponseEpoch, userTurnKey: data.submittedUserTurnKey }];
     case 'dom_monitor.root_attached':
       return ['search', phaseScope, 'Assistant DOM monitor attached to the scoped conversation root', { ...fields, source: data.source, turnBoundary: data.turnBoundary || '' }];
     case 'dom_monitor.started':

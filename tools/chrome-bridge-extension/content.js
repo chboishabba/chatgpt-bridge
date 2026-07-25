@@ -6,7 +6,7 @@
   if (!EXTENSION_API || !RUNTIME_CONFIG) throw new Error('ChatGPT extension runtime modules were not loaded before content.js');
   const { DEFAULT_CONFIG, readBrowserLaunchMetadataFromUrl, safeLaunchBridgeServerUrl } = RUNTIME_CONFIG;
   const INSTANCE_KEY = '__chatgptBrowserBridgeCompanionInstance';
-  const CONTENT_SCRIPT_VERSION = '4.3.8';
+  const CONTENT_SCRIPT_VERSION = '4.3.9';
   const EXTENSION_PROTOCOL_VERSION = 5;
   const EXTENSION_BUNDLE_ID = String(globalThis.ChatGptBridgeBuildIdentity?.bundleId || '');
   const CONTENT_EPOCH = `content-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -302,9 +302,9 @@
     shouldDeferFinalizationForSteer, subscribeTabObservation, thinkingNodeTokens, thinkingStateByTurn, unique, visibleText,
   });
   const {
-    simpleHash, domPathForNode, getTurnNodes, turnKey, turnRole, getAssistantNodes, getAssistantNodeFromTurn,
+    simpleHash, domPathForNode, getTurnNodes, turnKey, turnRole, getAssistantNodes, getAssistantNodeFromTurn, readUserTurnPromptText,
     waitForSubmittedUserTurnAnchor, refreshRequestTurnAnchors, readLatestAssistantSnapshot, readAssistantSnapshotByTurnKey,
-    readRecentAssistantSnapshots, readAssistantSnapshot, readAssistantNodeSnapshot, attachDomObserver, collectAndEmit,
+    readRecentAssistantSnapshots, readAssistantSnapshot, readAssistantNodeSnapshot, readSubmittedUserTurnError, attachDomObserver, collectAndEmit,
     releaseRequest, scheduleCollect, startDomMonitor, getCurrentSession,
     conversationIdFromUrl, handleSessionsList, handleSessionsNew, handleSessionsSelect, handleSessionsDelete,
     handleBrowserTabOpen, handleBrowserTabClose, handleBrowserOwnedTabClose, handleBrowserTabReload, handleExtensionReload,
@@ -328,6 +328,7 @@
     getCurrentSession,
     getTurnNodes,
     readAssistantNodeSnapshot,
+    readUserTurnPromptText,
     removeFloatingPanel,
     scheduleCollect,
     schedulePageStatus,
@@ -394,6 +395,7 @@
     waitForSubmittedUserTurnAnchor,
     pagePresence,
     readIntelligenceState,
+    readSubmittedUserTurnError,
   });
   const { handlePassivePromptSubmit, handlePromptCancel, handlePromptSend, handlePromptSteer,
     handleRequestRelease, handleRequestResume, handleEffectReconcile } = requestCommandsApi;
@@ -405,8 +407,6 @@
     normalizeText,
     send,
   });
-
-
   async function handleStandaloneReconcile(payload) {
     const commandId = String(payload.commandId || '');
     const commandType = String(payload.commandType || '');
@@ -442,7 +442,6 @@
       send({ type: 'standalone.reconciliation', commandId, commandType, outcome: 'unknown', evidence: { source: 'content.read_probe', error: error?.message || String(error) } });
     }
   }
-
   const SERVER_COMMAND_ROUTER_FACTORY = globalThis.ChatGptServerCommandRouter;
   if (!SERVER_COMMAND_ROUTER_FACTORY) throw new Error('ChatGPT server command router module was not loaded before content.js');
   const { handleServerMessage } = SERVER_COMMAND_ROUTER_FACTORY.createServerCommandRouter({
@@ -488,7 +487,6 @@
     settleUnexecutableEffect,
     updatePanel,
   });
-
   try {
     chrome.runtime.onMessage?.addListener?.((message) => {
       if (message?.type !== 'extension.ui.open') return false;

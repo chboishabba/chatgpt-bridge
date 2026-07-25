@@ -223,6 +223,10 @@
       error: {
         explicit: blocker === BlockerState.EXPLICIT_ERROR,
         message: string(snapshot.errorText),
+        code: string(snapshot.errorCode),
+        kind: string(snapshot.errorKind),
+        retryable: Boolean(snapshot.errorRetryable),
+        userTurnKey: string(snapshot.errorUserTurnKey),
       },
       boundLeaseProjection: activeRequest ? {
         requestId: string(activeRequest.requestId),
@@ -303,6 +307,10 @@
       semanticRecords(observation.artifacts),
       Boolean(observation.error?.explicit),
       observation.error?.message || '',
+      observation.error?.code || '',
+      observation.error?.kind || '',
+      Boolean(observation.error?.retryable),
+      observation.error?.userTurnKey || '',
       observation.activeRequest?.requestId || '',
       observation.activeRequest?.leaseId || '',
       Number(observation.activeRequest?.responseEpoch) || 0,

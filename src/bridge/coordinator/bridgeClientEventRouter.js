@@ -169,18 +169,35 @@ handleClientMessage(clientId, payload, envelope = null) {
       }));
     }
     if (transition?.accepted && effectType === 'prompt.submit') {
-      const promptTransition = this.lifecycle.ingestRequestTransition(state, this.lifecycle.canonicalEvent(state, RequestEventType.PROMPT_SUBMITTED, {
+      const result = payload.result && typeof payload.result === 'object' ? payload.result : {};
+      const retryAttempt = Math.max(0, Number(result.retryAttempt) || 0);
+      const eventType = retryAttempt > 0 ? RequestEventType.PROMPT_RETRY_ACCEPTED : RequestEventType.PROMPT_SUBMITTED;
+      const promptTransition = this.lifecycle.ingestRequestTransition(state, this.lifecycle.canonicalEvent(state, eventType, retryAttempt > 0 ? {
+        clientId,
+        effectId: payload.effectId || '',
+        submissionSource: 'browser_effect_result',
+        retryAttempt,
+        previousResponseEpoch: Math.max(0, Number(result.previousResponseEpoch) || 0),
+        targetResponseEpoch: Math.max(0, Number(result.targetResponseEpoch) || 0),
+        userTurnKey: String(result.submittedUserTurnKey || ''),
+      } : {
         clientId,
         effectId: payload.effectId || '',
         submissionSource: 'browser_effect_result',
       }, 'browser_effect'));
       if (promptTransition?.accepted) {
-        this.lifecycle.emitRequestEvent(state, makeEvent('prompt.sent', {
+        this.lifecycle.emitRequestEvent(state, makeEvent(retryAttempt > 0 ? 'request.retry.accepted' : 'prompt.sent', {
           requestId,
           clientId,
           effectId: String(payload.effectId || ''),
           effectType,
           submissionSource: 'browser_effect_result',
+          ...(retryAttempt > 0 ? {
+            retryAttempt,
+            previousResponseEpoch: Math.max(0, Number(result.previousResponseEpoch) || 0),
+            targetResponseEpoch: Math.max(0, Number(result.targetResponseEpoch) || 0),
+            submittedUserTurnKey: String(result.submittedUserTurnKey || ''),
+          } : {}),
         }));
       }
     }

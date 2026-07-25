@@ -3,6 +3,7 @@ import { AsyncMutex } from '../../mutex.js';
 import { makeRequestId } from '../../protocol.js';
 import { createPromptExecutionPlan } from '../requestExecutionPlan.js';
 import { log } from '../../logger.js';
+import { config } from '../../config.js';
 import {
   abortError,
   makeEvent,
@@ -302,6 +303,11 @@ export class RequestSubmissionCoordinator {
           sourceClientId: '',
           leaseId: requestIdentity.leaseId,
           ownerServerInstanceId: requestIdentity.ownerServerInstanceId,
+          responseRetryPolicy: {
+            maxRetries: Math.max(0, Number(config.chatGptTransientErrorMaxRetries) || 0),
+            baseDelayMs: Math.max(100, Number(config.chatGptTransientErrorRetryBaseMs) || 1_000),
+            maxDelayMs: Math.max(100, Number(config.chatGptTransientErrorRetryMaxMs) || 8_000),
+          },
         }, 'request_start'));
         this.lifecycle.emitRequestEvent(state, startedEvent);
         this.lifecycle.touchState(state, 'request.started');

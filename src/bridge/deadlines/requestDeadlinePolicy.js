@@ -95,6 +95,19 @@ export function deadlineIntentsForRequest(state, rawOptions = {}) {
     ));
   }
 
+  if (state.responseRetry?.status === 'scheduled' && Number(state.responseRetry?.dueAt) > 0) {
+    intents.push(intent(
+      state,
+      RequestDeadlineKind.RESPONSE_RETRY,
+      Number(state.responseRetry.dueAt),
+      {
+        attempt: Math.max(1, Number(state.responseRetry.scheduledAttempt) || 1),
+        failedUserTurnKey: String(state.responseRetry.failedUserTurnKey || ''),
+        message: `Retry ChatGPT request after transient UI failure (${state.responseRetry.scheduledAttempt}/${state.responseRetry.maxRetries})`,
+      },
+    ));
+  }
+
   if (state.lifecycle === RequestLifecycle.ARTIFACT_SETTLING) {
     const completionDeadline = positive(state.completion?.deadlineAt, 0);
     const nextProbeAt = positive(state.completion?.nextProbeAt, 0);

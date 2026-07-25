@@ -17,6 +17,7 @@ import { CanonicalRequestRuntime } from './canonicalRequestRuntime.js';
 import { RequestRecoveryCoordinator } from './requestRecoveryCoordinator.js';
 import { RequestResultMaterializer } from './requestResultMaterializer.js';
 import { RequestCancellationCoordinator } from './requestCancellationCoordinator.js';
+import { RequestResponseRetryCoordinator } from './requestResponseRetryCoordinator.js';
 import { createRequestEffectDescriptor, resumePromptExecutionPlan } from '../requestExecutionPlan.js';
 import { canonicalGenerationActive, isRequestRuntimeFinished } from './requestRuntimeProjection.js';
 
@@ -52,6 +53,7 @@ export class RequestLifecycleCoordinator {
     });
     this.results = new RequestResultMaterializer(this);
     this.cancellation = new RequestCancellationCoordinator(this);
+    this.responseRetry = new RequestResponseRetryCoordinator(this);
     this.recovery = new RequestRecoveryCoordinator(this);
     this.runtime = new CanonicalRequestRuntime({
       dispatch: (requestId, event) => {
@@ -192,6 +194,10 @@ export class RequestLifecycleCoordinator {
     });
   }
   if (isRequestRuntimeFinished(state)) return null;
+  if (effect.type === RequestEffectType.PROMPT_RESPONSE_RETRY) {
+    return await this.responseRetry.execute(state, effect);
+  }
+
   if (effect.type === RequestEffectType.PROMPT_EXECUTION_STEP) {
     if (!this.resumePrompt) throw new Error('Prompt execution continuation is unavailable');
     if (this.requestState.store.get(state.requestId)?.submission === SubmissionState.SUBMITTED) {
@@ -341,6 +347,7 @@ export class RequestLifecycleCoordinator {
     const previousCanonicalState = this.requestState.store.get(state.requestId);
     const outcome = this.requestState.transition(state.requestId, event);
     if (outcome?.accepted) {
+      this.responseRetry.emitScheduled(state, outcome);
       if (outcome.state?.completion?.pending && !previousCanonicalState?.completion?.pending) {
         const now = Date.now();
         state.requiredArtifactWaitSince = Number(outcome.state.completion.requestedAt) || now;

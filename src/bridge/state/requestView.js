@@ -10,6 +10,8 @@ export function displayPhaseForState(state = {}) {
   if (state.terminal && state.lifecycle === RequestLifecycle.FAILED) return 'failed';
   if (state.lifecycle === RequestLifecycle.COMPLETED) return 'completed';
   if (state.lifecycle === RequestLifecycle.ARTIFACT_SETTLING) return 'artifact_settling';
+  if (state.responseRetry?.status === 'scheduled') return 'retry_backoff';
+  if (state.responseRetry?.status === 'dispatching') return 'retrying';
   if (state.blocker === RequestBlocker.CONFIRMATION) return 'needs_confirmation';
   if (state.blocker === RequestBlocker.CONTINUE) return 'needs_continue';
   if (state.lifecycle === RequestLifecycle.FINALIZING) return 'finalizing';
@@ -43,6 +45,7 @@ export function compactCanonicalRequestState(state = null) {
     effect: state.effect,
     completion: state.completion,
     liveness: state.liveness,
+    responseRetry: state.responseRetry,
     terminal: state.terminal,
     timestamps: state.timestamps,
     lastObservation: state.lastObservation,

@@ -438,6 +438,26 @@ export class MockExtensionTab extends EventEmitter {
     const request = requestIdentity(envelope, body);
     const step = this.#step(body);
     if (!request || !step) throw Object.assign(new Error('Mock prompt.send requires request identity and execution step'), { code: 'MOCK_EXECUTION_PLAN_INVALID' });
+    const retry = body.responseRetry && typeof body.responseRetry === 'object' ? body.responseRetry : null;
+    if (retry && step.kind === 'page.ready.initial') {
+      const current = this.state.activeRequest || {};
+      const failedUser = [...this.state.turns].reverse().find((turn) => turn.role === 'user');
+      const previousResponseEpoch = Math.max(0, Number(retry.previousResponseEpoch) || 0);
+      const targetResponseEpoch = Math.max(0, Number(retry.targetResponseEpoch) || 0);
+      const retryProven = String(current.requestId || '') === request.requestId
+        && Number(current.responseEpoch || 0) === previousResponseEpoch
+        && request.responseEpoch === targetResponseEpoch
+        && targetResponseEpoch === previousResponseEpoch + 1
+        && String(failedUser?.key || '') === String(retry.failedUserTurnKey || '')
+        && failedUser?.errorCode === 'CHATGPT_TRANSIENT_REQUEST_ERROR'
+        && failedUser?.errorRetryable === true;
+      if (!retryProven) {
+        throw Object.assign(new Error('Mock response retry preconditions are not proven by the failed user turn'), {
+          code: 'MOCK_RESPONSE_RETRY_PRECONDITION_FAILED',
+          provenNotExecuted: true,
+        });
+      }
+    }
     this.state.activeRequest = { ...(this.state.activeRequest || {}), ...request };
     let preparationResult = null;
     if (step.kind === 'session.apply') {
@@ -465,7 +485,17 @@ export class MockExtensionTab extends EventEmitter {
     this.state.activeRequest = { ...request, submittedUserTurnKey: userKey };
     this.lastPrompt = String(body.message || '');
     await this.publishObservation('prompt.user-appended');
-    await this.#effect(envelope, step, { submitted: true, submittedUserTurnKey: userKey, session: this.state.sessionProjection() });
+    await this.#effect(envelope, step, {
+      submitted: true,
+      submittedUserTurnKey: userKey,
+      session: this.state.sessionProjection(),
+      ...(retry ? {
+        retryAttempt: Math.max(1, Number(retry.attempt) || 1),
+        previousResponseEpoch: Math.max(0, Number(retry.previousResponseEpoch) || 0),
+        targetResponseEpoch: Math.max(0, Number(retry.targetResponseEpoch) || request.responseEpoch),
+        failedUserTurnKey: String(retry.failedUserTurnKey || ''),
+      } : {}),
+    });
     if (conversationTransition) {
       setTimeout(() => {
         if (!this.state.completeConversationCanonicalization(conversationTransition.temporaryId)) return;
@@ -658,6 +688,14 @@ export class MockExtensionTab extends EventEmitter {
       submittedUserTurnIndex: userIndex,
     } : null;
     const final = Boolean(snapshot.assistant?.final && !this.state.generating);
+    const userError = snapshot.user?.errorText ? {
+      explicit: true,
+      message: String(snapshot.user.errorText),
+      code: String(snapshot.user.errorCode || 'CHATGPT_TRANSIENT_REQUEST_ERROR'),
+      kind: String(snapshot.user.errorKind || 'transient_request_error'),
+      retryable: snapshot.user.errorRetryable !== false,
+      userTurnKey: String(snapshot.user.key || ''),
+    } : { explicit: false, message: '' };
     const outputState = this.state.generating
       ? (snapshot.progressItems.length ? 'reasoning' : 'streaming')
       : final ? 'final' : 'none';
@@ -703,7 +741,7 @@ export class MockExtensionTab extends EventEmitter {
         promptBoundary: snapshot.user ? { submittedUserTurnKey: snapshot.user.key, submittedUserTurnIndex: userIndex } : null,
       } : { state: 'none', phase: this.state.phase, key: '', index: -1, userKey: snapshot.user?.key || '', userIndex, userPrompt: snapshot.user?.text || '' },
       generation: { state: this.state.generating ? 'active' : 'stopped', stopVisible: this.state.generating && !this.state.steerReady, sendVisible: this.state.generating && this.state.steerReady, streamingVisible: this.state.generating, activeTool: false },
-      blocker: { state: 'none' },
+      blocker: { state: userError.explicit ? 'explicit_error' : 'none' },
       output: {
         state: outputState,
         answer: snapshot.answer,
@@ -722,7 +760,7 @@ export class MockExtensionTab extends EventEmitter {
       },
       artifact: { state: artifacts.length ? 'ready' : 'not_expected', count: artifacts.length },
       artifacts,
-      error: { explicit: false, message: '' },
+      error: userError,
       uiErrors: [],
       blockers: [],
       parserDiagnostics: [],

@@ -114,7 +114,7 @@ test('extension reload waits for the exact command acceptance ACK before restart
   });
 
   const scheduled = await coordinator.scheduleExtensionReload({
-    expectedVersion: '2.3.9',
+    expectedVersion: '2.3.10',
     sourceTabId: 77,
     commandId: 'reload-command',
     reloadTabs: false,

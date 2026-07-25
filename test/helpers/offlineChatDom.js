@@ -372,6 +372,8 @@ export async function createAssistantFixtureParser() {
   await loadClassic(context, 'tools/chrome-bridge-extension/content/domUtilities.js');
   await loadClassic(context, 'tools/chrome-bridge-extension/content/responseDom.js');
   await loadClassic(context, 'tools/chrome-bridge-extension/content/artifactDom.js');
+  await loadClassic(context, 'tools/chrome-bridge-extension/content/userTurnState.js');
+  await loadClassic(context, 'tools/chrome-bridge-extension/content/turnUiSignals.js');
   await loadClassic(context, 'tools/chrome-bridge-extension/content/turnSnapshots.js');
 
   const utilities = context.ChatGptDomUtilities;
@@ -438,6 +440,26 @@ export async function createAssistantFixtureParser() {
         reason: 'offline_captured_fixture',
         captureSourceHtml: Boolean(options.captureSourceHtml),
       });
+    },
+    parseUserTurn(html = '') {
+      const root = parseCapturedHtml(html);
+      currentBody = new FakeElement('body');
+      currentBody.append(root);
+      context.document = currentBody;
+      window.document = currentBody;
+      const turn = snapshots.getTurnNodes()[0] || root;
+      return {
+        prompt: snapshots.readUserTurnPromptText(turn),
+        error: snapshots.classifyUserTurnError(turn),
+      };
+    },
+    parseRequestWithoutAssistant(html = '', request = {}) {
+      const root = parseCapturedHtml(html);
+      currentBody = new FakeElement('body');
+      currentBody.append(root);
+      context.document = currentBody;
+      window.document = currentBody;
+      return snapshots.readAssistantSnapshot(request);
     },
   });
 }

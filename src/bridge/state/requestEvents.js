@@ -76,6 +76,7 @@ export const RequestDeadlineKind = Object.freeze({
   ARTIFACT_SETTLE: 'artifact_settle',
   EFFECT: 'effect',
   RECOVERY: 'recovery',
+  RESPONSE_RETRY: 'response_retry',
 });
 
 export const RequestEffectType = Object.freeze({
@@ -86,6 +87,7 @@ export const RequestEffectType = Object.freeze({
   EFFECT_RECONCILE: 'effect.reconcile.requested',
   PROMPT_EXECUTION_STEP: 'prompt.execution.step_requested',
   PROMPT_CANCEL_RETRY: 'prompt.cancel.retry_requested',
+  PROMPT_RESPONSE_RETRY: 'prompt.response.retry_requested',
 });
 
 export const RequestTerminalCode = Object.freeze({
@@ -101,6 +103,7 @@ export const RequestTerminalCode = Object.freeze({
   FAILED: 'failed',
   CANCELLED: 'cancelled',
   RECOVERY_UNCERTAIN: 'recovery_uncertain',
+  CHATGPT_TRANSIENT_ERROR_RETRY_EXHAUSTED: 'chatgpt_transient_error_retry_exhausted',
 });
 
 export const RequestEventType = Object.freeze({
@@ -112,6 +115,7 @@ export const RequestEventType = Object.freeze({
   RESPONSE_BOUNDARY_REBOUND: 'response.boundary_rebound',
   RESPONSE_BOUNDARY_LOST: 'response.boundary_lost',
   STEER_ACCEPTED: 'prompt.steer_accepted',
+  PROMPT_RETRY_ACCEPTED: 'prompt.retry_accepted',
   OBSERVATION_UPDATED: 'observation.updated',
   OUTPUT_UPDATED: 'output.updated',
   ARTIFACT_UPDATED: 'artifact.updated',

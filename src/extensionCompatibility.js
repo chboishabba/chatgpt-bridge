@@ -9,9 +9,9 @@ export const EXTENSION_COMPATIBILITY = Object.freeze({
   protocolVersion: 5,
   minProtocolVersion: 5,
   maxProtocolVersion: 5,
-  minExtensionVersion: '2.3.9',
-  recommendedExtensionVersion: '2.3.9',
-  minContentVersion: '4.3.8',
+  minExtensionVersion: '2.3.10',
+  recommendedExtensionVersion: '2.3.10',
+  minContentVersion: '4.3.9',
 });
 
 export function parseVersion(value = '') {

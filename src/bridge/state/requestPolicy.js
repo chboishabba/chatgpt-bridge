@@ -82,6 +82,18 @@ export function createInitialRequestState(options = {}) {
       lastProbeAt: 0,
       evidence: null,
     },
+    responseRetry: {
+      attempts: 0,
+      scheduledAttempt: 0,
+      maxRetries: Math.max(0, Number(options.responseRetryPolicy?.maxRetries ?? 3) || 0),
+      baseDelayMs: Math.max(100, Number(options.responseRetryPolicy?.baseDelayMs) || 1_000),
+      maxDelayMs: Math.max(100, Number(options.responseRetryPolicy?.maxDelayMs) || 8_000),
+      status: 'idle',
+      dueAt: 0,
+      failedUserTurnKey: '',
+      lastErrorCode: '',
+      lastErrorMessage: '',
+    },
     liveness: {
       lastForcedSnapshotAt: 0,
       lastDeadline: null,

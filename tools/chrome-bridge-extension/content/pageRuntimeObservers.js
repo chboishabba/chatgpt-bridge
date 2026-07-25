@@ -11,6 +11,7 @@
       getCurrentSession,
       getTurnNodes,
       removeFloatingPanel,
+      readUserTurnPromptText,
       scheduleCollect,
       schedulePageStatus,
       scheduleTabObservation,
@@ -38,6 +39,7 @@
     }
 
     function textFor(turn) {
+      if (roleFor(turn) === 'user' && typeof readUserTurnPromptText === 'function') return String(readUserTurnPromptText(turn) || '').trim();
       return String(typeof visibleText === 'function'
         ? visibleText(turn)
         : turn?.innerText || turn?.textContent || '').trim();

@@ -6,14 +6,21 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.10`;
-- extension: `2.3.9`;
-- content runtime: `4.3.8`;
+- bridge package: `6.3.11`;
+- extension: `2.3.10`;
+- content runtime: `4.3.9`;
 - extension protocol: `5` only;
 - background runtime schema: `6` only;
 - WebSocket endpoint: `/extension/ws`.
 
 No polling, page-context WebSocket, userscript transport, protocol downgrade, alternate request lifecycle, job API, or alternate interactive runtime remains.
+
+## 6.3.11 ChatGPT request-error recovery
+
+- Real E2E 47 exposed a ChatGPT-owned transient failure after a user turn was already submitted. The localized error banner is now parsed as typed evidence instead of being merged into the user prompt.
+- The canonical reducer schedules one same-lease response retry per deadline, with default exponential delays of 1s, 2s, and 4s. Each attempt advances `responseEpoch`; retry exhaustion is terminal and typed.
+- Content accepts a retry only when the exact failed user-turn key, error code, lease identity, previous epoch, and target epoch still match the live DOM and request projection.
+- Response retry execution intentionally omits `session.apply`, preserving the exact proved conversation boundary.
 
 ## 6.3.10 hidden-tab submission and physical release parity
 

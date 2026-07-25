@@ -8,6 +8,7 @@ import {
   RequestLifecycle,
   RequestTerminalCode,
   SourceConnection,
+  SubmissionState,
 } from './requestEvents.js';
 import {
   applyLifecyclePatch,
@@ -42,6 +43,7 @@ export function cloneState(state) {
     },
     completion: { ...state.completion },
     liveness: { ...state.liveness },
+    responseRetry: { ...(state.responseRetry || {}) },
     timestamps: { ...state.timestamps },
     terminal: state.terminal ? { ...state.terminal } : null,
     diagnostics: [...(state.diagnostics || [])],
@@ -176,6 +178,73 @@ export function applyObservation(state, event) {
     return terminalResult(next, RequestTerminalCode.REQUEST_REPLACED, 'Source tab replaced the active request', data, event, diagnostics);
   }
   if (data.explicitError === true || next.blocker === RequestBlocker.EXPLICIT_ERROR) {
+    const failedUserTurnKey = String(data.failedUserTurnKey || '');
+    const activeUserTurnKey = String(next.response?.userTurnKey || '');
+    const retryableTransient = data.errorRetryable === true
+      && String(data.errorCode || '') === 'CHATGPT_TRANSIENT_REQUEST_ERROR'
+      && failedUserTurnKey
+      && failedUserTurnKey === activeUserTurnKey;
+    if (retryableTransient) {
+      const retry = next.responseRetry || {};
+      const sameFailureAlreadyPending = ['scheduled', 'dispatching'].includes(String(retry.status || ''))
+        && String(retry.failedUserTurnKey || '') === failedUserTurnKey
+        && String(retry.lastErrorCode || '') === String(data.errorCode || '');
+      if (sameFailureAlreadyPending) {
+        diagnostics.push({ code: 'chatgpt_transient_error_duplicate', message: 'Ignored duplicate transient ChatGPT error while retry is already pending', data });
+        return { state: appendDiagnostics(next, diagnostics), effects: [], deadlines: [], diagnostics };
+      }
+      const nextAttempt = Math.max(0, Number(retry.attempts) || 0) + 1;
+      const maxRetries = Math.max(0, Number(retry.maxRetries) || 0);
+      if (nextAttempt > maxRetries) {
+        return terminalResult(
+          next,
+          RequestTerminalCode.CHATGPT_TRANSIENT_ERROR_RETRY_EXHAUSTED,
+          `ChatGPT request failed after ${maxRetries} automatic retr${maxRetries === 1 ? 'y' : 'ies'}`,
+          { ...data, attempts: Math.max(0, Number(retry.attempts) || 0), maxRetries },
+          event,
+          diagnostics,
+        );
+      }
+      const baseDelayMs = Math.max(100, Number(retry.baseDelayMs) || 1_000);
+      const maxDelayMs = Math.max(baseDelayMs, Number(retry.maxDelayMs) || 8_000);
+      const delayMs = Math.min(maxDelayMs, baseDelayMs * (2 ** Math.max(0, nextAttempt - 1)));
+      const dueAt = transitionTime(event) + delayMs;
+      diagnostics.push({
+        code: 'chatgpt_transient_error_retry_scheduled',
+        message: `ChatGPT transient request error; retry ${nextAttempt}/${maxRetries} scheduled in ${delayMs}ms`,
+        data: { ...data, attempt: nextAttempt, maxRetries, delayMs, dueAt },
+      });
+      return {
+        state: appendDiagnostics({
+          ...next,
+          submission: SubmissionState.ACCEPTED,
+          generation: GenerationState.STOPPED,
+          blocker: RequestBlocker.RECOVERY,
+          output: OutputState.NONE,
+          responseRetry: {
+            ...retry,
+            scheduledAttempt: nextAttempt,
+            status: 'scheduled',
+            dueAt,
+            failedUserTurnKey,
+            lastErrorCode: String(data.errorCode || ''),
+            lastErrorMessage: String(data.errorMessage || data.message || ''),
+          },
+        }, diagnostics),
+        effects: [],
+        deadlines: [{
+          id: `response-retry:${state.requestId}:${nextAttempt}:${dueAt}`,
+          kind: RequestDeadlineKind.RESPONSE_RETRY,
+          type: RequestDeadlineKind.RESPONSE_RETRY,
+          dueAt,
+          attempt: nextAttempt,
+          delayMs,
+          failedUserTurnKey,
+          message: `Retry ChatGPT request after transient UI failure (${nextAttempt}/${maxRetries})`,
+        }],
+        diagnostics,
+      };
+    }
     return terminalResult(
       next,
       RequestTerminalCode.EXPLICIT_UI_ERROR,
@@ -184,6 +253,19 @@ export function applyObservation(state, event) {
       event,
       diagnostics,
     );
+  }
+
+  if (['scheduled', 'dispatching'].includes(String(next.responseRetry?.status || ''))
+      && (data.generation === GenerationState.ACTIVE
+        || data.output === OutputState.REASONING
+        || data.output === OutputState.STREAMING
+        || data.completionCandidate === true)) {
+    next = {
+      ...next,
+      blocker: data.blocker || RequestBlocker.NONE,
+      responseRetry: { ...next.responseRetry, status: 'idle', dueAt: 0, scheduledAttempt: 0 },
+    };
+    diagnostics.push({ code: 'chatgpt_transient_error_retry_cancelled', message: 'Cancelled pending retry because ChatGPT resumed the current response', data });
   }
   if (data.completionCandidate === true) {
     return applyTerminalSnapshot(appendDiagnostics(next, diagnostics), {

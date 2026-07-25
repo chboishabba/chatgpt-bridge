@@ -81,7 +81,8 @@ export function reduceRequestState(state, event) {
 
   const eventResponseEpoch = event.data?.responseEpoch;
   if (eventResponseEpoch != null && Number(eventResponseEpoch) !== Number(state.response?.epoch || 0)
-      && event.type !== RequestEventType.STEER_ACCEPTED) {
+      && event.type !== RequestEventType.STEER_ACCEPTED
+      && event.type !== RequestEventType.PROMPT_RETRY_ACCEPTED) {
     const diagnostic = { code: 'response_epoch_mismatch', message: `Ignored response epoch ${eventResponseEpoch}; active epoch is ${state.response?.epoch || 0}` };
     return { accepted: false, state: appendDiagnostics(state, [diagnostic]), effects: [], deadlines: [], diagnostics: [diagnostic] };
   }

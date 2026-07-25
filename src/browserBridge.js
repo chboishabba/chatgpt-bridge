@@ -70,7 +70,10 @@ export class BrowserBridge {
         const client = Array.from(this.#hub.clients || []).find((candidate) => candidate.id === sourceClientId);
         if (!client) throw new Error(`Browser extension client not found for prompt recovery: ${sourceClientId}`);
         const state = this.#pending.get(String(payload.requestId || ''));
-        const sent = this.#browserClients.sendPromptToClient(client, payload, { ...options, request: this.#lifecycle.requestIdentity(state) });
+        const sent = this.#browserClients.sendPromptToClient(client, payload, {
+          ...options,
+          request: this.#lifecycle.requestIdentity(state, payload.responseEpoch),
+        });
         return await sent.delivered;
       },
     });
