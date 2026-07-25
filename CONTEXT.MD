@@ -6,7 +6,7 @@ This project exposes HTTP, OpenAI-compatible, RPC, workflow, and Terlio.js inter
 
 Current release contract:
 
-- bridge package: `6.3.11`;
+- bridge package: `6.3.12`;
 - extension: `2.3.10`;
 - content runtime: `4.3.9`;
 - extension protocol: `5` only;
@@ -14,6 +14,14 @@ Current release contract:
 - WebSocket endpoint: `/extension/ws`.
 
 No polling, page-context WebSocket, userscript transport, protocol downgrade, alternate request lifecycle, job API, or alternate interactive runtime remains.
+
+## 6.3.12 successful-run mock parity
+
+- The deterministic extension now emits production `TabObservation` schema 1 states instead of a mock-only schema and no longer invents observation-level steer controls absent from the live runtime.
+- Startup reproduces the live `interactive -> complete` document transition while keeping page readiness true.
+- The reasoning simulator reproduces the reviewed E2E-48 pattern: the first attempt omits 100%, and the second attempt exposes the complete 0%-100% sequence.
+- Local transport injects bounded exact-envelope duplicates and one late stale observation so the full E2E matrix exercises Protocol 5 deduplication and canonical stale-event rejection.
+- `test/fixtures/e2e-real/successful-run-e2e48.json` is the reviewed cross-layer contract for the last complete real run.
 
 ## 6.3.11 ChatGPT request-error recovery
 

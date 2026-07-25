@@ -58,13 +58,23 @@ test('mock model-effort scenario reproduces non-exact model wording after a veri
   assert.equal(state.outputSnapshot().answer, 'MOD');
 });
 
-test('mock ChatGPT emits the complete reasoning checkpoint sequence before the final answer', async () => {
-  const { revisions, output } = await generated('This is a reasoning test. TEST_LOCAL_REASONING_BEGIN then TEST_LOCAL_REASONING_FINISH.');
-  const percentages = [...new Set(revisions.flatMap(({ snapshot }) => snapshot.progressItems.map((item) => Number.parseInt(item.text, 10))).filter(Number.isFinite))];
-  assert.deepEqual(percentages, Array.from({ length: 11 }, (_, index) => index * 10));
-  assert.match(output.answer, /^TEST_LOCAL_REASONING_BEGIN/);
-  assert.match(output.answer, /TEST_LOCAL_REASONING_FINISH$/);
-  assert.ok(output.codeBlocks.some((block) => block.language === 'javascript'));
+test('mock ChatGPT reproduces an incomplete first reasoning attempt and a complete second attempt', async () => {
+  const state = new MockChatGptStateMachine({ tabId: 42 });
+  const observedAttempts = [];
+  let finalOutput = null;
+  for (const suffix of ['R1', 'R2']) {
+    const prompt = `This is a reasoning test. TEST_LOCAL_REASONING_${suffix}_BEGIN then TEST_LOCAL_REASONING_${suffix}_FINISH.`;
+    state.appendUser(prompt);
+    const revisions = [];
+    await state.generate(prompt, { onChange: async (reason) => revisions.push({ reason, snapshot: state.outputSnapshot() }) });
+    observedAttempts.push([...new Set(revisions.flatMap(({ snapshot }) => snapshot.progressItems.map((item) => Number.parseInt(item.text, 10))).filter(Number.isFinite))]);
+    finalOutput = state.outputSnapshot();
+  }
+  assert.deepEqual(observedAttempts[0], Array.from({ length: 10 }, (_, index) => index * 10));
+  assert.deepEqual(observedAttempts[1], Array.from({ length: 11 }, (_, index) => index * 10));
+  assert.match(finalOutput.answer, /^TEST_LOCAL_REASONING_R2_BEGIN/);
+  assert.match(finalOutput.answer, /TEST_LOCAL_REASONING_R2_FINISH$/);
+  assert.ok(finalOutput.codeBlocks.some((block) => block.language === 'javascript'));
 });
 
 test('mock ChatGPT creates separately downloadable text, JSON, and CSV artifacts', async () => {

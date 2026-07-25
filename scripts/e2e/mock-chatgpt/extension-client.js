@@ -57,7 +57,7 @@ function effectResultBody(step = {}, request = {}, result = {}) {
 }
 
 export class MockExtensionTab extends EventEmitter {
-  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null, releaseDelayMs = 150 } = {}) {
+  constructor({ bridgeUrl, bridgeToken = '', tabId, registry, pageOrigin = '', launchToken = '', requestedUrl = 'https://chatgpt.com/', active = true, focused = false, state = null, releaseDelayMs = 150, deliveryNoise = true } = {}) {
     super();
     if (!bridgeUrl) throw new TypeError('Mock extension tab requires bridgeUrl');
     this.bridgeUrl = String(bridgeUrl).replace(/\/$/, '');
@@ -87,6 +87,12 @@ export class MockExtensionTab extends EventEmitter {
     this.pageReloadCount = 0;
     this.trampolineReloadCount = 0;
     this.releaseDelayMs = Math.max(0, Number(releaseDelayMs) || 0);
+    this.documentReadyState = 'interactive';
+    this.deliveryNoise = deliveryNoise !== false;
+    this.duplicateBudgets = new Map([[ExtensionMessageType.TAB_OBSERVATION, 2], [ExtensionMessageType.EFFECT_SUCCEEDED, 1]]);
+    this.duplicateDeliveryCount = 0;
+    this.lateObservationCount = 0;
+    this.staleObservationCandidate = null;
   }
 
   publicLayoutUrl() {
@@ -120,7 +126,7 @@ export class MockExtensionTab extends EventEmitter {
       extensionProtocolVersion: 5,
       visibilityState: this.active ? 'visible' : 'hidden',
       focused: this.active && this.focused,
-      documentReadyState: 'complete',
+      documentReadyState: this.documentReadyState,
       pageReady: true,
       composerReady: true,
       chatMainReady: true,
@@ -142,6 +148,9 @@ export class MockExtensionTab extends EventEmitter {
         extensionReloadCount: this.extensionReloadCount,
         pageReloadCount: this.pageReloadCount,
         trampolineReloadCount: this.trampolineReloadCount,
+        deliveryNoise: this.deliveryNoise,
+        duplicateDeliveryCount: this.duplicateDeliveryCount,
+        lateObservationCount: this.lateObservationCount,
       },
     };
   }
@@ -166,6 +175,11 @@ export class MockExtensionTab extends EventEmitter {
     this.connected = true;
     await this.send(ExtensionMessageType.TRANSPORT_HELLO, this.helloBody());
     await this.publishObservation('hello');
+    if (this.documentReadyState !== 'complete') {
+      this.documentReadyState = 'complete';
+      await delay(10);
+      await this.publishObservation('document.complete');
+    }
     this.emit('connected', this);
     return this;
   }
@@ -173,8 +187,15 @@ export class MockExtensionTab extends EventEmitter {
   async reconnect({ replaceBackground = false, replaceContent = true } = {}) {
     const old = this.ws;
     this.connected = false;
-    if (replaceBackground) this.backgroundEpoch = `mock-background-${randomUUID()}`;
-    if (replaceContent) this.contentEpoch = `mock-content-${randomUUID()}`;
+    if (replaceBackground) {
+      this.backgroundEpoch = `mock-background-${randomUUID()}`;
+      this.duplicateBudgets = new Map([[ExtensionMessageType.TAB_OBSERVATION, 2], [ExtensionMessageType.EFFECT_SUCCEEDED, 1]]);
+    }
+    if (replaceContent) {
+      this.contentEpoch = `mock-content-${randomUUID()}`;
+      this.documentReadyState = 'interactive';
+      this.staleObservationCandidate = null;
+    }
     this.sequence = 0;
     try { old?.terminate?.(); } catch {}
     await delay(25);
@@ -222,7 +243,16 @@ export class MockExtensionTab extends EventEmitter {
         });
       });
     }
-    this.ws.send(JSON.stringify(envelope));
+    const serialized = JSON.stringify(envelope);
+    this.ws.send(serialized);
+    const remainingDuplicates = Number(this.duplicateBudgets.get(messageType) || 0);
+    if (this.deliveryNoise && remainingDuplicates > 0) {
+      this.duplicateBudgets.set(messageType, remainingDuplicates - 1);
+      this.duplicateDeliveryCount += 1;
+      setTimeout(() => {
+        if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(serialized);
+      }, 5).unref?.();
+    }
     if (acknowledgement) await acknowledgement;
     return envelope;
   }
@@ -688,6 +718,7 @@ export class MockExtensionTab extends EventEmitter {
       submittedUserTurnIndex: userIndex,
     } : null;
     const final = Boolean(snapshot.assistant?.final && !this.state.generating);
+    const hasAssistant = Boolean(snapshot.assistant);
     const userError = snapshot.user?.errorText ? {
       explicit: true,
       message: String(snapshot.user.errorText),
@@ -695,7 +726,7 @@ export class MockExtensionTab extends EventEmitter {
       kind: String(snapshot.user.errorKind || 'transient_request_error'),
       retryable: snapshot.user.errorRetryable !== false,
       userTurnKey: String(snapshot.user.key || ''),
-    } : { explicit: false, message: '' };
+    } : { explicit: false, message: '', code: '', kind: '', retryable: false, userTurnKey: '' };
     const outputState = this.state.generating
       ? (snapshot.progressItems.length ? 'reasoning' : 'streaming')
       : final ? 'final' : 'none';
@@ -713,8 +744,9 @@ export class MockExtensionTab extends EventEmitter {
       sourceTurnKey: snapshot.assistant?.key || '',
       turnKey: snapshot.assistant?.key || '',
     }));
+    const artifactState = artifacts.length ? 'ready' : 'none';
     return {
-      schemaVersion: 4,
+      schemaVersion: 1,
       revision: Math.max(0, Number(this.state.revision) || 0),
       observerId: `${this.clientId}:${this.contentEpoch}`,
       observedAt: Date.now(),
@@ -724,24 +756,25 @@ export class MockExtensionTab extends EventEmitter {
       conversationId: this.state.conversationId,
       visibility: this.active ? 'visible' : 'hidden',
       focused: this.active && this.focused,
-      document: { state: 'ready', readyState: 'complete', pageReady: true, chatMainReady: true },
-      composer: { state: 'ready', ready: true, sendVisible: this.state.generating && this.state.steerReady, attachments: this.state.attachments.map((item) => ({ ...item })) },
+      document: { state: 'ready', readyState: this.documentReadyState, chatMainReady: true, pageReady: true },
+      composer: { state: 'ready', ready: true },
       activeRequest: active,
       boundLeaseProjection: active,
       turn: snapshot.assistant ? {
-        state: final ? 'final' : 'active',
+        state: final ? 'final' : (snapshot.progressItems.length ? 'reasoning' : 'streaming'),
         phase: this.state.phase,
         key: snapshot.assistant.key,
         index: assistantIndex,
         messageId: snapshot.assistant.messageId || snapshot.assistant.key,
         modelSlug: this.state.selectedModel,
+        count: this.state.turns.filter((turn) => turn.role === 'assistant').length,
         userKey: snapshot.user?.key || '',
         userIndex,
         userPrompt: snapshot.user?.text || '',
         promptBoundary: snapshot.user ? { submittedUserTurnKey: snapshot.user.key, submittedUserTurnIndex: userIndex } : null,
-      } : { state: 'none', phase: this.state.phase, key: '', index: -1, userKey: snapshot.user?.key || '', userIndex, userPrompt: snapshot.user?.text || '' },
-      generation: { state: this.state.generating ? 'active' : 'stopped', stopVisible: this.state.generating && !this.state.steerReady, sendVisible: this.state.generating && this.state.steerReady, streamingVisible: this.state.generating, activeTool: false },
-      blocker: { state: userError.explicit ? 'explicit_error' : 'none' },
+      } : { state: 'none', phase: this.state.phase, key: '', index: -1, messageId: '', modelSlug: '', count: 0, userKey: snapshot.user?.key || '', userIndex, userPrompt: snapshot.user?.text || '', promptBoundary: null },
+      generation: { state: this.state.generating ? 'active' : hasAssistant ? 'stopped' : 'idle', stopVisible: this.state.generating && !this.state.steerReady, streamingVisible: this.state.generating, activeTool: false },
+      blocker: { state: userError.explicit ? 'explicit_error' : 'none', confirmation: false, continue: false },
       output: {
         state: outputState,
         answer: snapshot.answer,
@@ -753,17 +786,19 @@ export class MockExtensionTab extends EventEmitter {
         codeBlocks: snapshot.codeBlocks,
         codeBlockDiagnostics: [],
         parserAudit: snapshot.parserAudit,
-        format: 'markdown',
+        format: outputState === 'none' ? 'none' : 'markdown',
         raw: snapshot.assistant?.text || '',
+        answerLength: String(snapshot.answer || '').length,
+        thinkingLength: String(snapshot.thinking || '').length,
+        progressLength: String(snapshot.progress || '').length,
         finalMessage: final,
         actionBarVisible: final,
       },
-      artifact: { state: artifacts.length ? 'ready' : 'not_expected', count: artifacts.length },
+      artifact: { state: artifactState, count: artifacts.length },
       artifacts,
       error: userError,
-      uiErrors: [],
-      blockers: [],
-      parserDiagnostics: [],
+      degraded: false,
+      evidence: { snapshotReason: hasAssistant ? 'mock_assistant_node' : 'no_assistant_node', unknownTestIds: [], assistantNodeCount: hasAssistant ? 1 : 0 },
       mock: { layoutUrl: this.publicLayoutUrl() },
     };
   }
@@ -771,7 +806,7 @@ export class MockExtensionTab extends EventEmitter {
   async publishObservation(reason = '') {
     if (!this.connected || this.ws?.readyState !== WebSocket.OPEN) return;
     const observation = this.createObservation();
-    await this.send(ExtensionMessageType.TAB_OBSERVATION, {
+    const body = {
       type: 'tab.observation',
       observation,
       revision: observation.revision,
@@ -779,7 +814,20 @@ export class MockExtensionTab extends EventEmitter {
       session: this.state.sessionProjection(),
       url: this.state.url,
       title: 'ChatGPT',
-    }, { request: this.state.activeRequest, causationId: reason || null });
+    };
+    if (this.deliveryNoise && /generation-started$/.test(String(reason)) && !this.staleObservationCandidate) {
+      this.staleObservationCandidate = structuredClone(body);
+    }
+    await this.send(ExtensionMessageType.TAB_OBSERVATION, body, { request: this.state.activeRequest, causationId: reason || null });
+    if (this.deliveryNoise && /generation-completed$/.test(String(reason)) && this.staleObservationCandidate && this.lateObservationCount === 0) {
+      const stale = this.staleObservationCandidate;
+      this.staleObservationCandidate = null;
+      this.lateObservationCount += 1;
+      await this.send(ExtensionMessageType.TAB_OBSERVATION, {
+        ...stale,
+        reason: 'mock.late-stale-observation',
+      }, { request: this.state.activeRequest, causationId: 'mock.late-stale-observation' });
+    }
   }
 }
 

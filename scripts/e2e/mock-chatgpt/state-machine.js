@@ -96,12 +96,17 @@ async function responseForPrompt(prompt, context = {}) {
     return {
       answer: `TEST_${testId}_BEGIN\n\n25502500\n\n\`\`\`javascript\nconsole.log((100 * 101 / 2) ** 2);\n\`\`\`\n\nTEST_${testId}_FINISH`,
       reasoning: true,
-      progress: Array.from({ length: 11 }, (_, index) => index * 10),
+      progress: Array.from({ length: context.reasoningAttempt === 1 ? 10 : 11 }, (_, index) => index * 10),
     };
   }
 
   if (/sum of squares/i.test(source) && /STEER_RESULT RED/i.test(source)) {
-    return { answer: 'STEER_RESULT RED', steerable: true, generationDelayMs: 2_200 };
+    return {
+      answer: 'STEER_RESULT RED',
+      reasoning: true,
+      progress: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
+      progressDelayMs: 350,
+    };
   }
 
   if (/98765431 is prime/i.test(source)) {
@@ -256,6 +261,7 @@ export class MockChatGptStateMachine {
     this.lastWorkflowContext = null;
     this.attachments = [];
     this.transientRequestFailures = new Set();
+    this.reasoningRequestCount = 0;
   }
 
   get session() { return this.sessions.get(this.sessionId); }
@@ -404,6 +410,9 @@ export class MockChatGptStateMachine {
   }
 
   async generate(prompt, { onChange = () => {}, request = null } = {}) {
+    const reasoningAttempt = /reasoning test/i.test(String(prompt || '')) && /TEST_/.test(String(prompt || ''))
+      ? ++this.reasoningRequestCount
+      : 0;
     const plan = await responseForPrompt(prompt, {
       previousAssistant: [...this.turns].reverse().find((turn) => turn.role === 'assistant')?.text || '',
       previousProjectResult: this.lastProjectResult,
@@ -411,6 +420,7 @@ export class MockChatGptStateMachine {
       previousWorkflowContext: this.lastWorkflowContext,
       selectedModel: this.selectedModel,
       selectedEffort: this.selectedEffort,
+      reasoningAttempt,
     });
     const generationSequence = ++this.generationSequence;
     this.activeGenerationSequence = generationSequence;
@@ -433,7 +443,7 @@ export class MockChatGptStateMachine {
         this.steerReady = true;
         this.revision += 1;
         await onChange(`reasoning-${percentage}`);
-        await delay(90);
+        await delay(Math.max(10, Number(plan.progressDelayMs) || 90));
       }
     } else if (plan.generationDelayMs) {
       turn.text = 'Working…';

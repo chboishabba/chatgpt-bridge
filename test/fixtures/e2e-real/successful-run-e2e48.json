@@ -1,0 +1,47 @@
+{
+  "source": "last-real-e2e(48)",
+  "status": "passed",
+  "scenarioIds": [
+    "conversation",
+    "reload-mid-request",
+    "quarantine-isolation",
+    "response-markdown",
+    "reasoning-lifecycle",
+    "model-effort",
+    "reasoning-steer",
+    "multiple-files",
+    "zip-artifact",
+    "passive-workflow",
+    "workflow-multi-bridge",
+    "workflow-approval",
+    "workflow-remediation",
+    "project-context",
+    "project-no-context"
+  ],
+  "startupObservation": {
+    "schemaVersion": 1,
+    "documentReadyState": "interactive",
+    "visibility": "hidden",
+    "focused": false,
+    "generationState": "idle",
+    "artifactState": "none"
+  },
+  "reasoningAttempts": [
+    { "progressPercentages": [0,10,20,30,40,50,60,70,80,90], "missingPercentages": [100] },
+    { "progressPercentages": [0,10,20,30,40,50,60,70,80,90,100], "missingPercentages": [] }
+  ],
+  "transportNoise": {
+    "duplicateProtocolMessages": 381,
+    "lateRequestEventsRejected": 19,
+    "requiresExactCountsInMock": false
+  },
+  "transientRetry": {
+    "observed": false,
+    "retryBackoffCount": 0
+  },
+  "artifactMaterializationSources": ["page-url", "chrome-downloads", "chrome-downloads"],
+  "extension": {
+    "version": "2.3.10",
+    "contentVersion": "4.3.9"
+  }
+}
