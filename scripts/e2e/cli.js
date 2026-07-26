@@ -40,7 +40,7 @@ export function parseArgs(argv) {
     captureDomFixtures: false,
     fixtureOutputDir: '',
     capturePageLayout: false,
-    extensionReloadPolicy: process.env.E2E_EXTENSION_RELOAD || 'ask',
+    extensionReloadPolicy: process.env.E2E_EXTENSION_RELOAD || 'if-needed',
     extensionReloadPolicyExplicit: Boolean(process.env.E2E_EXTENSION_RELOAD),
     mockChatGpt: process.env.E2E_MOCK_CHATGPT === '1',
   };
@@ -140,7 +140,7 @@ Options:
   --artifact-timeout-ms   Artifact materialization timeout, 10-60s (default: 45000)
   --no-start-server       Require an already running bridge
   --no-open-browser       Disable OS browser fallback
-  --reload-extension      Deploy and reload the unpacked extension only when its files or versions differ
+  --reload-extension      Deploy and reload the unpacked extension only when its files or versions differ (default for real E2E)
   --force-reload-extension Reload the unpacked extension even when it is already current
   --no-reload-extension   Skip the startup extension reload prompt
   --mock-chatgpt          Use the deterministic local ChatGPT layout/state machine

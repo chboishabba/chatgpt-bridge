@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { compareVersions, EXTENSION_COMPATIBILITY } from '../../src/extensionCompatibility.js';
 import { maybeReloadExtensionAtStartup } from '../../src/extensionStartup.js';
 
-export async function maybeReloadE2eExtension(options, { api, testLog, preferredClientId = '' } = {}) {
+export async function maybeReloadE2eExtension(options, { api, testLog, preferredClientId = '', bootstrapClient = null } = {}) {
   return await maybeReloadExtensionAtStartup({
     policy: options.extensionReloadPolicy,
     mode: 'real E2E',
     preferredClientId,
+    bootstrapClient,
     waitTimeoutMs: 5_000,
     reloadTimeoutMs: Math.max(20_000, Number(options.tabReadyTimeoutMs) || 30_000),
     getHealth: async () => await api(options, '/browser/clients'),
@@ -49,7 +50,15 @@ export async function prepareIsolatedE2eTab(options, { api, waitUntil, testLog, 
     api,
     testLog,
     preferredClientId: opened.client.id,
+    bootstrapClient: async () => opened,
   });
+  if (extensionStartupReload?.status === 'blocked') {
+    throw new Error(extensionStartupReload.compatibility?.message || `Extension startup update was blocked: ${extensionStartupReload.reason || 'unknown reason'}`);
+  }
+  if (['always', 'if-needed'].includes(String(options.extensionReloadPolicy || ''))
+    && !['reloaded', 'skipped'].includes(String(extensionStartupReload?.status || ''))) {
+    throw new Error(`Extension startup update did not complete: ${extensionStartupReload?.status || 'missing result'}`);
+  }
 
   step(`Waiting for ChatGPT composer in the startup tab`);
   const readyClient = await waitUntil(async () => {

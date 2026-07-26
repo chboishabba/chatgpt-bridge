@@ -97,6 +97,56 @@ export async function waitForReloadableExtension(getHealth, {
   return { client: null, health: lastHealth, waitedMs: Date.now() - startedAt };
 }
 
+
+function bootstrapResultClient(result = null) {
+  if (!result || typeof result !== 'object') return null;
+  return result.client && typeof result.client === 'object' ? result.client : result;
+}
+
+async function bootstrapReloadableExtension({
+  bootstrapClient,
+  getHealth,
+  preferredClientId = '',
+  waitTimeoutMs = 15_000,
+  mode = 'startup',
+  info = {},
+  deployment = null,
+  log = () => {},
+} = {}) {
+  if (typeof bootstrapClient !== 'function') return null;
+  log('action', `Opening a dedicated ChatGPT tab to bootstrap the ${mode} extension update...`);
+  let opened;
+  try {
+    opened = await bootstrapClient({
+      mode,
+      timeoutMs: waitTimeoutMs,
+      expectedVersion: String(info.version || ''),
+      expectedBundleId: String(info.bundleId || ''),
+      expectedContentVersion: String(info.contentVersion || ''),
+      extensionDir: String(info.extensionDir || ''),
+      installDir: String(deployment?.targetDir || ''),
+    });
+  } catch (cause) {
+    const error = new Error(`Could not open a ChatGPT bootstrap tab for the extension update: ${cause?.message || cause}`);
+    error.code = 'EXTENSION_UPDATE_BOOTSTRAP_FAILED';
+    error.cause = cause;
+    throw error;
+  }
+  const directClient = bootstrapResultClient(opened);
+  const bootstrappedId = String(directClient?.id || preferredClientId || '');
+  const connected = await waitForReloadableExtension(getHealth, {
+    timeoutMs: waitTimeoutMs,
+    preferredClientId: bootstrappedId,
+  });
+  if (!connected.client) {
+    const error = new Error(`The ChatGPT bootstrap tab opened, but no Protocol 5 extension client connected within ${waitTimeoutMs}ms. Confirm that the unpacked extension is loaded from ${deployment?.targetDir || info.extensionDir || 'the packaged extension directory'} and configured for this bridge.`);
+    error.code = 'EXTENSION_UPDATE_BOOTSTRAP_TIMEOUT';
+    error.bootstrap = opened || null;
+    throw error;
+  }
+  log('ok', `Extension update bootstrap tab connected as ${connected.client.id}.`);
+  return { ...connected, bootstrap: opened || null };
+}
 export async function maybeReloadExtensionAtStartup({
   policy = 'ask',
   mode = 'startup',
@@ -109,9 +159,12 @@ export async function maybeReloadExtensionAtStartup({
   input = process.stdin,
   output = process.stdout,
   waitTimeoutMs = 15_000,
+  initialWaitTimeoutMs = Math.min(2_500, waitTimeoutMs),
   reloadTimeoutMs = 30_000,
   reloadTabs = true,
   preferredClientId = '',
+  bootstrapClient = null,
+  bootstrapBeforeReload = false,
   log = () => {},
 } = {}) {
   if (typeof getHealth !== 'function') throw new TypeError('getHealth is required');
@@ -125,10 +178,29 @@ export async function maybeReloadExtensionAtStartup({
     ? `Extension bundle deployed atomically to ${deployment.targetDir}.`
     : `Extension bundle already uses the loaded target ${deployment.targetDir}.`);
 
-  const connected = await waitForReloadableExtension(getHealth, { timeoutMs: waitTimeoutMs, preferredClientId });
+  let connected = await waitForReloadableExtension(getHealth, { timeoutMs: initialWaitTimeoutMs, preferredClientId });
+  let bootstrapApproved = normalizedPolicy === 'always' || normalizedPolicy === 'if-needed' || deployment.deployed;
   if (!connected.client) {
-    log('warn', `No connected extension was available for ${mode} startup reload.`);
-    return { status: 'skipped', reason: 'not-connected', policy: normalizedPolicy, waitedMs: connected.waitedMs, deployment, ...info };
+    if (normalizedPolicy === 'ask' && !bootstrapApproved) {
+      const answer = await confirm(
+        `No ChatGPT tab is currently connected. Open a temporary ChatGPT tab and reload the unpacked extension from ${deployment.targetDir}?`,
+        { input, output, defaultValue: true },
+      );
+      if (answer === null) {
+        log('info', `Skipping ${mode} extension reload because no interactive confirmation channel is available.`);
+        return { status: 'skipped', reason: 'non-interactive', policy: normalizedPolicy, deployment, ...info };
+      }
+      if (!answer) return { status: 'skipped', reason: 'declined', policy: normalizedPolicy, deployment, ...info };
+      bootstrapApproved = true;
+    }
+    if (!bootstrapApproved || typeof bootstrapClient !== 'function') {
+      const error = new Error(`No connected extension was available for ${mode} startup reload, and no bootstrap tab could be opened.`);
+      error.code = 'EXTENSION_UPDATE_CLIENT_UNAVAILABLE';
+      throw error;
+    }
+    connected = await bootstrapReloadableExtension({
+      bootstrapClient, getHealth, preferredClientId, waitTimeoutMs, mode, info, deployment, log,
+    });
   }
 
   if (Number(connected.client.extensionProtocolVersion) !== 5) {
@@ -160,10 +232,10 @@ export async function maybeReloadExtensionAtStartup({
     };
   }
 
-  let approved = normalizedPolicy === 'always' || normalizedPolicy === 'if-needed' || deployment.deployed;
+  let approved = normalizedPolicy === 'always' || normalizedPolicy === 'if-needed' || deployment.deployed || (Boolean(connected.bootstrap) && bootstrapApproved);
   if ((normalizedPolicy === 'ask' || normalizedPolicy === 'if-needed') && deployment.deployed) {
     log('action', `Extension files changed at ${deployment.targetDir}; reloading the connected unpacked extension even though its version string is unchanged.`);
-  } else if (normalizedPolicy === 'ask') {
+  } else if (normalizedPolicy === 'ask' && !approved) {
     const currentVersion = String(connected.client.extensionVersion || 'unknown');
     const currentContentVersion = String(connected.client.clientVersion || 'unknown');
     log('action', `Extension update confirmation required for ${mode}. Local: v${info.version}${info.contentVersion ? ` / content ${info.contentVersion}` : ''}; connected: v${currentVersion} / content ${currentContentVersion}.`);
@@ -178,6 +250,17 @@ export async function maybeReloadExtensionAtStartup({
     approved = answer;
   }
   if (!approved) return { status: 'skipped', reason: 'declined', policy: normalizedPolicy, clientId: connected.client.id, deployment, ...info };
+
+  if (bootstrapBeforeReload && typeof bootstrapClient === 'function' && !connected.bootstrap) {
+    connected = await bootstrapReloadableExtension({
+      bootstrapClient, getHealth, preferredClientId: connected.client.id, waitTimeoutMs, mode, info, deployment, log,
+    });
+    if (Number(connected.client.extensionProtocolVersion) !== 5) {
+      const error = new Error('The dedicated update tab connected through an extension that does not support Protocol 5 reload control.');
+      error.code = 'EXTENSION_UPDATE_BOOTSTRAP_PROTOCOL_INCOMPATIBLE';
+      throw error;
+    }
+  }
 
   log('action', `Reloading unpacked extension deployed at ${deployment.targetDir}...`);
   const result = await reload({

@@ -18,7 +18,8 @@ import { TurnManager } from './turnManager.js';
 import { CodexRpcServer, runCodexStdio } from './codexRpcServer.js';
 import { ProjectService } from './projectService.js';
 import { WorkflowManager } from './workflow/workflowManager.js';
-import { maybeReloadExtensionAtStartup, normalizeExtensionReloadPolicy } from './extensionStartup.js';
+import { normalizeExtensionReloadPolicy } from './extensionStartup.js';
+import { runInteractiveStartupExtensionUpdate } from './interactive/startupExtensionUpdate.js';
 import { shutdownBridgeResources } from './shutdown.js';
 import {
   initWorkflowConfig,
@@ -213,21 +214,23 @@ if (isDebugClient) {
 
     if (isInteractive) {
       try {
-        await maybeReloadExtensionAtStartup({
+        await runInteractiveStartupExtensionUpdate({
+          bridge,
           policy: startupExtensionReloadPolicy,
-          mode: 'interactive',
-          waitTimeoutMs: 5_000,
-          getHealth: async () => bridge.health(),
-          reload: async (options) => await bridge.reloadExtension(options),
+          publicBaseUrl: config.publicBaseUrl,
+          waitTimeoutMs: 15_000,
+          reloadTimeoutMs: 45_000,
           log: (level, message) => {
             const line = `[extension] ${message}`;
             if (level === 'warn') console.warn(line);
-            else if (level === 'action') console.log(line);
             else console.log(line);
           },
         });
       } catch (err) {
-        console.error(`[extension] Startup reload failed: ${err.message}`);
+        console.error(`[extension] Startup update failed: ${err.message}`);
+        console.error('[extension] Interactive mode will not start with an incompatible browser runtime. Fix the extension update and run the command again.');
+        await shutdown('interactive-extension-update-failed', 1);
+        return;
       }
     }
 

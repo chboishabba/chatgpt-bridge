@@ -12,3 +12,4 @@ build/
 __MACOSX/
 *.zip
 CHANGELOG.md
+/.bridge/

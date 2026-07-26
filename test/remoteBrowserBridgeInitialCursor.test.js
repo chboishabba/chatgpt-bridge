@@ -42,7 +42,7 @@ test('fresh latest-mode cursor skips retained turns that predate workflow bindin
   const received = [];
   const unsubscribe = bridge.onObservedTurn(async (turn) => { received.push(turn.turnKey); });
   try {
-    await waitFor(() => received.length === 1);
+    await waitFor(() => received.length === 1 && bridge.health().lastSequence === 6);
     assert.deepEqual(received, ['new-turn']);
     assert.equal(requests[0].searchParams.get('after'), '0');
     assert.equal(bridge.health().lastSequence, 6);
@@ -86,7 +86,7 @@ test('latest-mode cursor preserves a persisted worker cursor instead of jumping 
   const received = [];
   const unsubscribe = bridge.onObservedTurn(async (turn) => { received.push(turn.turnKey); });
   try {
-    await waitFor(() => received.length === 1);
+    await waitFor(() => received.length === 1 && bridge.health().lastSequence === 4);
     assert.deepEqual(received, ['resumed-turn']);
     assert.equal(requests[0].searchParams.get('after'), '3');
     assert.equal(bridge.health().cursorWasRestored, true);
