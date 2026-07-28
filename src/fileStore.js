@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createReadStream } from 'node:fs';
 import { config } from './config.js';
 
 function safeName(name = 'file') {
@@ -25,6 +25,60 @@ function decodeContent({ contentBase64, content }) {
   if (typeof contentBase64 === 'string' && contentBase64) return Buffer.from(contentBase64, 'base64');
   if (typeof content === 'string') return Buffer.from(content, 'utf8');
   return Buffer.alloc(0);
+}
+
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function identityFromStat(stat) {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    size: String(stat.size),
+    mtimeNs: String(stat.mtimeNs ?? BigInt(Math.trunc(Number(stat.mtimeMs || 0) * 1_000_000))),
+    ctimeNs: String(stat.ctimeNs ?? BigInt(Math.trunc(Number(stat.ctimeMs || 0) * 1_000_000))),
+  };
+}
+
+function sameIdentity(left, right) {
+  if (!left || !right) return false;
+  return ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].every((key) => String(left[key]) === String(right[key]));
+}
+
+function fileStoreError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+async function hashFileHandle(handle) {
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(128 * 1024);
+  let position = 0;
+  while (true) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+    if (!bytesRead) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  return hash.digest('hex');
+}
+
+async function storedFileFacts(target) {
+  const handle = await fs.open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile()) throw fileStoreError('UNSAFE_FILE_PATH', `Stored file is not a regular file: ${target}`);
+    const sha256 = await hashFileHandle(handle);
+    const after = await handle.stat({ bigint: true });
+    if (!sameIdentity(identityFromStat(before), identityFromStat(after))) {
+      throw fileStoreError('FILE_IDENTITY_CHANGED', `Stored file changed while it was being recorded: ${target}`);
+    }
+    return { sha256, fileIdentity: identityFromStat(after) };
+  } finally {
+    await handle.close();
+  }
 }
 
 export class FileStore {
@@ -67,6 +121,7 @@ export class FileStore {
     const storedName = `${safeStoredId(id)}${ext}`;
     const absolutePath = path.join(this.filesDir, storedName);
     await fs.writeFile(absolutePath, buffer);
+    const facts = await storedFileFacts(absolutePath);
 
     const record = {
       id,
@@ -75,6 +130,8 @@ export class FileStore {
       mime: mime || 'application/octet-stream',
       size: buffer.length,
       path: absolutePath,
+      sha256: sha256Buffer(buffer),
+      fileIdentity: facts.fileIdentity,
       createdAt: new Date().toISOString(),
       source,
     };
@@ -95,6 +152,7 @@ export class FileStore {
     const storedName = `${safeStoredId(id)}${ext}`;
     const absolutePath = path.join(this.filesDir, storedName);
     await fs.copyFile(absoluteSource, absolutePath);
+    const facts = await storedFileFacts(absolutePath);
 
     const record = {
       id,
@@ -103,6 +161,8 @@ export class FileStore {
       mime: mime || 'application/octet-stream',
       size: stat.size,
       path: absolutePath,
+      sha256: facts.sha256,
+      fileIdentity: facts.fileIdentity,
       createdAt: new Date().toISOString(),
       source: 'local-path',
     };
@@ -124,6 +184,7 @@ export class FileStore {
     const storedName = `${safeStoredId(id)}${ext}`;
     const absolutePath = path.join(this.artifactsDir, storedName);
     await fs.copyFile(absoluteSource, absolutePath);
+    const facts = await storedFileFacts(absolutePath);
     if (removeSource && path.resolve(absolutePath) !== absoluteSource) {
       await fs.unlink(absoluteSource).catch(() => null);
     }
@@ -135,6 +196,8 @@ export class FileStore {
       mime: mime || 'application/octet-stream',
       size: stat.size,
       path: absolutePath,
+      sha256: facts.sha256,
+      fileIdentity: facts.fileIdentity,
       createdAt: new Date().toISOString(),
       source,
       metadata,
@@ -154,6 +217,7 @@ export class FileStore {
     const storedName = `${safeStoredId(id)}${ext}`;
     const absolutePath = path.join(this.artifactsDir, storedName);
     await fs.writeFile(absolutePath, buffer);
+    const facts = await storedFileFacts(absolutePath);
 
     const record = {
       id,
@@ -162,6 +226,8 @@ export class FileStore {
       mime: mime || 'application/octet-stream',
       size: buffer.length,
       path: absolutePath,
+      sha256: sha256Buffer(buffer),
+      fileIdentity: facts.fileIdentity,
       createdAt: new Date().toISOString(),
       source,
       metadata,
@@ -202,6 +268,71 @@ export class FileStore {
       stream: createReadStream(record.path),
       absolutePath: record.path,
     };
+  }
+
+  async openVerifiedReadable(fileId, expected = {}) {
+    await this.ready;
+    const record = this.index.files[fileId] || this.index.artifacts[fileId];
+    if (!record) return null;
+    const target = path.resolve(record.path);
+    const listed = await fs.lstat(target, { bigint: true }).catch((error) => {
+      if (error.code === 'ENOENT') throw fileStoreError('FILE_NOT_FOUND', `Stored file is missing: ${fileId}`);
+      throw error;
+    });
+    if (listed.isSymbolicLink() || !listed.isFile()) {
+      throw fileStoreError('UNSAFE_FILE_PATH', `Stored file is not a regular file: ${fileId}`);
+    }
+
+    const handle = await fs.open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)).catch((error) => {
+      if (error.code === 'ELOOP') throw fileStoreError('UNSAFE_FILE_PATH', `Stored file is a symbolic link: ${fileId}`);
+      throw error;
+    });
+    try {
+      const opened = await handle.stat({ bigint: true });
+      const listedIdentity = identityFromStat(listed);
+      const openedIdentity = identityFromStat(opened);
+      if (!opened.isFile() || !sameIdentity(listedIdentity, openedIdentity)) {
+        throw fileStoreError('FILE_IDENTITY_CHANGED', `Stored file identity changed before it could be opened: ${fileId}`);
+      }
+      if (record.fileIdentity && !sameIdentity(record.fileIdentity, openedIdentity)) {
+        throw fileStoreError('FILE_IDENTITY_CHANGED', `Stored file changed after it was imported: ${fileId}`);
+      }
+      const size = Number(opened.size);
+      const requiredSize = expected.size ?? record.size;
+      if (Number.isFinite(Number(requiredSize)) && size !== Number(requiredSize)) {
+        throw fileStoreError('FILE_IDENTITY_CHANGED', `Stored file size changed after it was imported: ${fileId}`);
+      }
+      const sha256 = await hashFileHandle(handle);
+      const afterHash = await handle.stat({ bigint: true });
+      if (!sameIdentity(openedIdentity, identityFromStat(afterHash))) {
+        throw fileStoreError('FILE_IDENTITY_CHANGED', `Stored file changed while it was being verified: ${fileId}`);
+      }
+      const requiredHash = String(expected.sha256 || record.sha256 || record.metadata?.sha256 || '').toLowerCase();
+      if (requiredHash && sha256 !== requiredHash) {
+        throw fileStoreError('FILE_HASH_MISMATCH', `Stored file hash no longer matches its imported identity: ${fileId}`);
+      }
+      let closed = false;
+      return {
+        ...this.#publicRecord(record),
+        absolutePath: target,
+        size,
+        sha256,
+        identity: openedIdentity,
+        handle,
+        createReadStream: () => {
+          if (closed) throw fileStoreError('FILE_HANDLE_CLOSED', `Stored file is already closed: ${fileId}`);
+          return handle.createReadStream({ autoClose: false, start: 0 });
+        },
+        close: async () => {
+          if (closed) return;
+          closed = true;
+          await handle.close();
+        },
+      };
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
   }
 
   async listFiles() {
@@ -266,6 +397,7 @@ export class FileStore {
       createdAt: record.createdAt,
       source: record.source,
       metadata: record.metadata,
+      sha256: record.sha256,
     };
   }
 }

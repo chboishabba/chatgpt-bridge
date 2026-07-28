@@ -45,8 +45,8 @@ export class TransactionalApplier {
           maxEntries: workflow.artifact.maxEntries,
           maxUncompressedSize: workflow.artifact.maxExtractedBytes,
         },
-        excludedWritePaths: [workflow.resultProtocol?.manifest || 'bridge-result.json', 'bridge-workflow-instructions.md'],
-        excludedWritePrefixes: ['.bridge/'],
+        excludedWritePaths: [workflow.resultProtocol?.manifest || 'bridge-result.json', 'bridge-result.json', 'bridge-workflow-instructions.md'],
+        excludedWritePrefixes: ['.bridge/', '.zipflow/'],
       },
     });
     const changed = plan.plan.filesToCreate + plan.plan.filesToUpdate + plan.plan.filesLocallyChanged + plan.plan.filesToDelete + plan.plan.filesLocallyChangedDelete;
@@ -124,8 +124,8 @@ export class TransactionalApplier {
             maxEntries: workflow.artifact.maxEntries,
             maxUncompressedSize: workflow.artifact.maxExtractedBytes,
           },
-          excludedWritePaths: [workflow.resultProtocol?.manifest || 'bridge-result.json', 'bridge-workflow-instructions.md'],
-          excludedWritePrefixes: ['.bridge/'],
+          excludedWritePaths: [workflow.resultProtocol?.manifest || 'bridge-result.json', 'bridge-result.json', 'bridge-workflow-instructions.md'],
+          excludedWritePrefixes: ['.bridge/', '.zipflow/'],
         },
       });
       commands = await runWorkflowCommands(workflow.apply.commands, {

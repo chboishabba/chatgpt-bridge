@@ -280,6 +280,13 @@ export async function loadWorkflowConfig(filePath) {
       manifest: string(resultProtocol.manifest, 'bridge-result.json') || 'bridge-result.json',
       allowTextOnly: bool(resultProtocol.allowTextOnly, preset === 'guided-task'),
       requireCommitMessage: bool(resultProtocol.requireCommitMessage, false),
+      acceptLegacyManifest: bool(resultProtocol.acceptLegacyManifest, true),
+      producer: {
+        name: string(object(resultProtocol.producer).name, 'chatgpt-bridge'),
+        workflowId: string(object(resultProtocol.producer).workflowId),
+        requestId: string(object(resultProtocol.producer).requestId),
+        projectId: string(object(resultProtocol.producer).projectId),
+      },
       repairAction: invalidResponseAction,
       repairAttempts: Math.max(0, number(resultProtocol.repairAttempts, ux.invalidResponseAttempts ?? (preset ? 2 : 0))),
     },

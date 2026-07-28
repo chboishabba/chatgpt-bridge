@@ -110,7 +110,7 @@ function parseZipBuffer(buffer, options = {}) {
 
 function isMetadataOnlyTopLevel(name) {
   const top = String(name || '').replace(/\\/g, '/').split('/').filter(Boolean)[0] || '';
-  return top === '.bridge' || top === '.git' || top === 'node_modules';
+  return top === '.bridge' || top === '.zipflow' || top === '.git' || top === 'node_modules';
 }
 
 function commonTopLevelPrefix(files) {
@@ -148,6 +148,7 @@ function shouldSkipApplyPath(rel, options = {}) {
   if (!parts.length) return 'empty-path';
   if (parts[0] === '.git') return 'git-internals';
   if (parts[0] === '.bridge') return 'bridge-metadata';
+  if (parts[0] === '.zipflow') return 'zipflow-metadata';
   if (parts.includes('__MACOSX') || parts.some((part) => part === '.DS_Store' || part.startsWith('._'))) return 'archive-metadata';
   if (parts.includes('node_modules')) return 'node_modules';
   if (Array.isArray(options.skipTopLevel) && options.skipTopLevel.includes(parts[0])) return `skip:${parts[0]}`;
