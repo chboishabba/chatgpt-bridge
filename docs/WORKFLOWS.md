@@ -1,5 +1,11 @@
 # Workflow UX
 
+> Bridge 6.4 uses the authenticated local Zipflow service for all new workflow
+> execution. This document still describes the legacy v3 engine where needed
+> for active-run settlement and migration. The current ownership, commands,
+> persistence, recovery, and security contract is documented in
+> [Local workflow service integration](ZIPFLOW_SERVER.md).
+
 ChatGPT Browser Bridge provides an interactive workflow wizard for project tasks that need repeated ChatGPT turns, returned files, local checks, and controlled Git commits.
 
 The only workflow command a user needs to remember is:

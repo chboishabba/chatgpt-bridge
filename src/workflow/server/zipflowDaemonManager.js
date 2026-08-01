@@ -8,6 +8,12 @@ import {
 } from './zipflowRuntimeSecurity.js';
 
 const require = createRequire(import.meta.url);
+const STARTABLE_CONNECTION_CODES = new Set([
+  'CONNECTION_FAILED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EPIPE',
+]);
 
 function daemonError(code, message, details = {}, cause = null) {
   return Object.assign(new Error(message, cause ? { cause } : undefined), { code, details });
@@ -145,6 +151,7 @@ export class ZipflowDaemonManager {
     this.retryMs = retryMs;
     this.sleep = sleep;
     this.client = null;
+    this.ensurePromise = null;
     this.status = { state: 'idle', error: '', hello: null, discovery: null, managed: false };
   }
 
@@ -157,8 +164,16 @@ export class ZipflowDaemonManager {
       socketPath: discovered.discovery.socketPath,
       token: discovered.token,
     });
-    const hello = await client.hello();
+    let hello;
+    try {
+      hello = await client.hello();
+    } catch (error) {
+      await client.close?.().catch(() => {});
+      throw error;
+    }
+    const previous = this.client;
     this.client = client;
+    if (previous && previous !== client) await previous.close?.().catch(() => {});
     this.status = {
       state: 'ready',
       error: '',
@@ -181,17 +196,27 @@ export class ZipflowDaemonManager {
   }
 
   async ensure() {
+    if (!this.ensurePromise) {
+      this.ensurePromise = this.#ensureOnce().finally(() => {
+        this.ensurePromise = null;
+      });
+    }
+    return await this.ensurePromise;
+  }
+
+  async #ensureOnce() {
     this.status = { ...this.status, state: 'connecting', error: '' };
     try {
       return await this.discoverAndConnect();
     } catch (error) {
-      if (error.code !== 'ENOENT') {
+      if (error.code !== 'ENOENT' && !STARTABLE_CONNECTION_CODES.has(error.code)) {
         this.status = { ...this.status, state: 'degraded', error: error.message };
         throw error;
       }
-      const paths = daemonRuntimePaths(this.zipflowHome);
-      const runtime = await this.runtimeSecurity.inspectRuntime(paths);
-      if (runtime.state !== 'absent') {
+      const runtime = await this.runtimeSecurity.inspectRuntime(
+        daemonRuntimePaths(this.zipflowHome),
+      );
+      if (runtime.state === 'partial') {
         const unsafe = runtimeSecurityError(
           'ZIPFLOW_RUNTIME_INVALID',
           'Workflow service runtime state is incomplete; automatic startup was refused.',
@@ -199,6 +224,10 @@ export class ZipflowDaemonManager {
         );
         this.status = { ...this.status, state: 'degraded', error: unsafe.message };
         throw unsafe;
+      }
+      if (runtime.state === 'complete' && !STARTABLE_CONNECTION_CODES.has(error.code)) {
+        this.status = { ...this.status, state: 'degraded', error: error.message };
+        throw error;
       }
     }
 

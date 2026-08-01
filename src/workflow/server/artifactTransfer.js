@@ -15,6 +15,15 @@ function requireIdempotencyKey(value, operation) {
   return key;
 }
 
+function protocolCorrelation(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  return Object.fromEntries(
+    ['producer', 'workflowId', 'requestId']
+      .filter((key) => String(source[key] || '').trim())
+      .map((key) => [key, String(source[key])]),
+  );
+}
+
 export class ZipflowArtifactTransfer {
   constructor({ fileStore, client, persistCorrelation }) {
     if (!fileStore?.openVerifiedReadable) throw new Error('ZipflowArtifactTransfer requires a verified FileStore reader.');
@@ -85,9 +94,8 @@ export class ZipflowArtifactTransfer {
       kind: 'archive',
       blobId: uploaded.blobId,
       seriesId,
-      correlation: { ...correlation },
+      correlation: protocolCorrelation(correlation),
     }, { idempotencyKey: runKey });
     return { uploaded, run: run?.run || run };
   }
 }
-

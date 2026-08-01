@@ -14,6 +14,7 @@ export async function handleRuntimeKey(runtime, key) {
   if (runtime.confirmPrompt) return runtime.handleConfirmKey(key, text);
   if (runtime.workflowExitPrompt) return runtime.handleWorkflowExitKey(key, text);
   if (runtime.interruptPrompt) return runtime.handleInterruptKey(key, text);
+  if (runtime.workflowSurface?.controller?.opened) return runtime.handleWorkflowSurfaceKey(key);
 
   if (key.name === 'ctrl-c') return runtime.handleInterrupt();
   if (key.ctrl && key.name === 't') return runtime.togglePointerOverride();

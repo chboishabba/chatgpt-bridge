@@ -619,6 +619,7 @@ test('extension reload accepts a compatible reconnect even when the old runtime 
     expectedVersion: '2.3.11',
     timeoutMs: 2_000,
   });
+  assert.equal(result.recovery.used, false);
   assert.equal(result.recovery.reason, 'reconnected_before_terminal_result');
   assert.equal(result.reconnected.extensionVersion, '2.3.11');
   assert.equal(hub.reloadControlCalls.length, 1);

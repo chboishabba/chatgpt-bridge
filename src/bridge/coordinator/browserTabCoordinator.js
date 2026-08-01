@@ -257,7 +257,7 @@ export class BrowserTabCoordinator {
       return {
         accepted: { scheduled: true, inferredFromReconnect: true },
         reconnected: first.value,
-        recovery: { used: true, reason: 'reconnected_before_terminal_result' },
+        recovery: { used: false, reason: 'reconnected_before_terminal_result' },
       };
     }
     if (first.kind === 'reconnect_error') {

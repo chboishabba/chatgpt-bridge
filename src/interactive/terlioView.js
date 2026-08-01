@@ -30,6 +30,7 @@ import {
   transcriptScrollLabel,
 } from './terlioScroll.js';
 import { workflowActive, workflowDashboard, workflowStage } from '../workflow/ux/workflowView.js';
+import { renderWorkflowSurface } from './workflowSurfaces/index.js';
 
 export const INTERACTIVE_THEME = resolveInteractiveTheme(DEFAULT_INTERACTIVE_THEME_NAME);
 
@@ -53,10 +54,19 @@ export function prepareInteractiveView(model, viewport = {}) {
   const editorDisplay = model.editor?.getDisplayModel?.() || { value: String(model.editor?.value || ''), cursor: Number(model.editor?.cursor) || 0 };
   const editorRows = Math.max(1, Math.min(5, model.editor?.visualLineCount?.(Math.max(4, width - 4)) || String(editorDisplay.value || '').split('\n').length));
   const wizardOpen = Boolean(model.workflowWizard?.opened);
-  const suggestionCapacity = model.detailsOpen || wizardOpen ? 0 : resolveSuggestionCapacity(width, height);
+  const surfaceOpen = Boolean(model.workflowSurface?.opened);
+  const surfaceInputOpen = Boolean(model.workflowSurface?.input?.opened);
+  const suggestionCapacity = model.detailsOpen || wizardOpen || surfaceOpen ? 0 : resolveSuggestionCapacity(width, height);
   const suggestions = suggestionRows(model, width, suggestionCapacity);
   const visibleSuggestionRows = suggestions.length;
-  const inputHeight = model.detailsOpen || wizardOpen ? 0 : editorRows + 2 + visibleSuggestionRows;
+  const surfaceEditor = model.workflowSurface?.input?.editor;
+  const surfaceEditorRows = Math.max(1, Math.min(
+    5,
+    surfaceEditor?.visualLineCount?.(Math.max(4, width - 4)) || 1,
+  ));
+  const inputHeight = surfaceInputOpen
+    ? surfaceEditorRows + 2
+    : model.detailsOpen || wizardOpen || surfaceOpen ? 0 : editorRows + 2 + visibleSuggestionRows;
   const wizardMetrics = wizardOpen ? workflowWizardMetrics(model.workflowWizard, width, height) : null;
   const overlay = renderOverlay(model, theme, wizardMetrics);
   const overlayHeight = wizardMetrics?.height || (overlay ? 5 : 0);
@@ -71,10 +81,24 @@ export function prepareInteractiveView(model, viewport = {}) {
     ? resolveTranscriptScroll(model.detailsScroll || {}, { totalRows: detailsLines.length, visibleRows })
     : model.detailsScroll || null;
   const header = renderHeader({ health, state, workflow, workflowActivity: model.workflowActivity, busy: model.busy, phase: model.phase, tick: model.tick, width, theme });
-  const main = model.detailsOpen
+  const main = surfaceOpen
+    ? renderWorkflowSurfacePanel({ model, width, height: layout.mainHeight, theme })
+    : model.detailsOpen
     ? renderDetailsPanel({ model, lines: detailsLines, width, height: layout.mainHeight, details, theme })
     : renderMain({ model, workflow, layout, chatLines, transcript, theme });
-  const input = model.detailsOpen || wizardOpen ? null : renderInput({
+  const input = surfaceInputOpen ? renderInput({
+    model,
+    suggestions: [],
+    suggestionCapacity: 0,
+    width: layout.inputWidth,
+    height: inputHeight,
+    editorRows: surfaceEditorRows,
+    editorDisplay: surfaceEditor?.getDisplayModel?.(),
+    editor: surfaceEditor,
+    theme,
+    titleOverride: ' action input JSON › ',
+    placeholderOverride: '{}',
+  }) : model.detailsOpen || wizardOpen || surfaceOpen ? null : renderInput({
     model,
     suggestions,
     suggestionCapacity: visibleSuggestionRows,
@@ -182,13 +206,13 @@ export function renderMain({ model, workflow, layout, chatLines, transcript, the
   return Row({ gap: 1, widths: [layout.leftWidth, layout.chatWidth, layout.rightWidth], height: layout.mainHeight }, left, chatPane, right);
 }
 
-export function renderInput({ model, suggestions = [], suggestionCapacity = 5, width = 100, height = 4, editorRows = 1, editorDisplay = null, theme = INTERACTIVE_THEME, hint = '' } = {}) {
-  const editor = model.editor;
+export function renderInput({ model, suggestions = [], suggestionCapacity = 5, width = 100, height = 4, editorRows = 1, editorDisplay = null, editor = null, theme = INTERACTIVE_THEME, hint = '', titleOverride = '', placeholderOverride = '' } = {}) {
+  const activeEditor = editor || model.editor;
   const busy = Boolean(model.busy || model.confirmPrompt);
-  const placeholder = busy ? 'request is running; type /stop or press Ctrl+C' : hint || 'type a message or /help';
-  const title = busy ? ' busy › ' : ' bridge › ';
+  const placeholder = placeholderOverride || (busy ? 'request is running; type /stop or press Ctrl+C' : hint || 'type a message or /help');
+  const title = titleOverride || (busy ? ' busy › ' : ' bridge › ');
   const editorHeight = Math.max(1, Math.min(5, Number(editorRows) || 1));
-  const display = editorDisplay || editor?.getDisplayModel?.() || { value: editor?.value || '', cursor: editor?.cursor || 0 };
+  const display = editorDisplay || activeEditor?.getDisplayModel?.() || { value: activeEditor?.value || '', cursor: activeEditor?.cursor || 0 };
   const editorNode = TextEditorView({
     title,
     value: display.value || '',
@@ -200,6 +224,55 @@ export function renderInput({ model, suggestions = [], suggestionCapacity = 5, w
   });
   const rows = suggestions.map((item) => Text(item.selected ? color(theme, 'selected', item.text) : color(theme, 'suggestion', item.text), { wrap: false }));
   return Column({ height }, ...rows.slice(-suggestionCapacity), editorNode);
+}
+
+function renderWorkflowSurfacePanel({ model, width, height, theme }) {
+  const view = renderWorkflowSurface(model.workflowSurface?.surface || {});
+  const navigation = model.workflowSurface?.navigation || {};
+  const contentWidth = Math.max(12, width - 6);
+  const lines = [
+    color(theme, 'accent', view.title || 'Workflow'),
+    view.summary ? color(theme, 'muted', view.summary) : '',
+    ...view.lines,
+    '',
+    color(theme, 'accent', 'Actions'),
+    ...view.actions.map((action, index) => {
+      const selected = action.id === navigation.focusActionId;
+      const marker = selected ? '›' : ' ';
+      const detail = action.enabled ? action.description : action.disabledReason;
+      const token = !action.enabled
+        ? 'muted'
+        : selected
+          ? 'selected'
+          : action.role === 'destructive' ? 'danger' : 'suggestion';
+      return color(theme, token, `${marker} [${index + 1}] ${action.label}${detail ? ` · ${detail}` : ''}`);
+    }),
+  ];
+  const wrapped = lines.flatMap((line) => wrapText(line, contentWidth));
+  const visibleRows = Math.max(1, height - 2);
+  const scroll = resolveTranscriptScroll(model.workflowSurface?.scroll || {}, {
+    totalRows: wrapped.length,
+    visibleRows,
+  });
+  const window = visibleWindowLines(wrapped, { height: visibleRows, scroll: scroll.scroll });
+  const gutter = scrollbarForWindow({ totalRows: wrapped.length, visibleRows, scroll: window.scroll });
+  if (model.workflowSurface?.scroll) model.workflowSurface.scroll.scroll = window.scroll;
+  const rows = window.lines.map((line, index) => Text(
+    `${fitInline(line, contentWidth)} ${color(theme, 'muted', gutter[index])}`,
+    { wrap: false },
+  ));
+  const status = model.workflowSurface?.busy
+    ? ' · working'
+    : model.workflowSurface?.lastError?.message
+      ? ` · ${model.workflowSurface.lastError.message}`
+      : '';
+  return Box({
+    border: true,
+    borderColor: model.workflowSurface?.lastError ? theme.danger : theme.accent,
+    padding: { left: 1, right: 1 },
+    title: ` Workflow${status} · Esc close `,
+    height,
+  }, ...rows);
 }
 
 export function suggestionRows(model, width = 100, visibleCount = 5) {
@@ -503,6 +576,10 @@ function panelFromLines(title, lines, { height, theme, token, tail = true }) {
 }
 
 function footerHint(model, layout, transcript, suggestionCount = 0) {
+  if (model.workflowSurface?.opened) {
+    if (model.workflowSurface.input?.opened) return 'Enter run  ·  Shift+Enter newline  ·  Esc cancel input';
+    return '↑/↓ choose action  ·  Enter run  ·  1–9 select  ·  PgUp/PgDn scroll  ·  Esc close';
+  }
   if (model.workflowWizard?.opened) {
     const escape = model.workflowWizard.canGoBack ? 'Esc back' : 'Esc close';
     if (model.workflowWizard.input) return `Enter continue  ·  ${escape}`;

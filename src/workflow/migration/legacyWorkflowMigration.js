@@ -292,6 +292,7 @@ function mapDeploy(base, legacyConfig) {
 function bridgeRetainedSettings(legacyWorkflow, legacyConfig) {
   const state = legacyState(legacyWorkflow);
   return {
+    preset: text(legacyConfig?.preset || legacyWorkflow?.preset),
     binding: clone(state.binding || legacyWorkflow?.binding || {}),
     watch: clone(legacyConfig?.watch || {}),
     intelligence: {

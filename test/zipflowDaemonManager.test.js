@@ -130,6 +130,53 @@ test('daemon manager starts the installed server only when runtime discovery is 
   }
 });
 
+test('daemon manager delegates complete but unreachable runtime recovery to zipflow serve', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'bridge-zipflow-reconnect-'));
+  try {
+    await runtimeFixture(root);
+    let clients = 0;
+    let spawned = 0;
+    const child = new EventEmitter();
+    child.unref = () => {};
+    const manager = new ZipflowDaemonManager({
+      zipflowHome: root,
+      uid,
+      entrypointResolver: async () => '/package/bin/zipflow.js',
+      spawn() {
+        spawned += 1;
+        return child;
+      },
+      sleep: async () => {},
+      clientFactory: async () => {
+        clients += 1;
+        return {
+          async hello() {
+            if (clients === 1) {
+              throw Object.assign(new Error('endpoint unavailable'), {
+                code: 'CONNECTION_FAILED',
+                retryable: true,
+              });
+            }
+            return {
+              apiVersion: '1.0',
+              schemaRevision: 1,
+              serverEpoch: 'epoch-2',
+              capabilities: [],
+            };
+          },
+          async close() {},
+        };
+      },
+    });
+    const connected = await manager.ensure();
+    assert.equal(connected.hello.serverEpoch, 'epoch-2');
+    assert.equal(spawned, 1);
+    assert.equal(clients, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('daemon manager never starts over malformed or unsafe existing runtime state', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'bridge-zipflow-unsafe-'));
   try {

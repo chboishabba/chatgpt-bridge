@@ -43,7 +43,8 @@ function normalizeEvent(value = {}) {
 }
 
 function operationIdFrom(run = {}, fallback = '') {
-  return text(run.operationId || run.operation?.id || run.activeOperationId || fallback);
+  const source = run && typeof run === 'object' ? run : {};
+  return text(source.operationId || source.operation?.id || source.activeOperationId || fallback);
 }
 
 export class ZipflowWorkflowCoordinator {
@@ -71,7 +72,12 @@ export class ZipflowWorkflowCoordinator {
     this.state = normalizeWorkflowServerState();
     this.resources = { hello: null, project: null, run: null, operation: null };
     this.surface = null;
-    this.connectivity = { status: 'idle', error: '', serverEpoch: '' };
+    this.connectivity = {
+      status: 'idle',
+      error: '',
+      retryable: false,
+      serverEpoch: '',
+    };
     this.abortController = null;
     this.subscription = null;
     this.streamPromise = null;
@@ -88,10 +94,16 @@ export class ZipflowWorkflowCoordinator {
     };
   }
 
+  replaceClient(client) {
+    if (!client) throw new TypeError('Replacement Zipflow client is required');
+    this.client = client;
+  }
+
   async #setConnectivity(status, error = null, serverEpoch = '') {
     this.connectivity = {
       status,
       error: error ? text(error.message || error) : '',
+      retryable: error?.retryable === true,
       serverEpoch: text(serverEpoch || this.state.localWorkflow.serverEpoch),
     };
     await Promise.resolve(this.onConnectivity(clone(this.connectivity))).catch(() => null);

@@ -8,6 +8,10 @@ export {
   visibleProgressLines,
 } from './progress.js';
 export {
+  downloadLastTurnResult,
+  recoverLatestResponse,
+} from './recovery.js';
+export {
   INTERACTIVE_STATE_FILE,
   answerTextFromTurn,
   answerTextFromTurnItems,
@@ -25,11 +29,13 @@ export {
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { createSpinner } from '../spinner.js';
 import { captureConsoleLines } from './consoleCapture.js';
 import { bytes, shellSplit, truncate } from './format.js';
 import { applyLastTurnResult, applyZipPathResult } from './apply.js';
+import { startServerArchiveWorkflow } from './serverWorkflowCommands.js';
 import { createConsoleStream, reconcileVisibleProgressSnapshot, renderEvent, visibleProgressLines } from './progress.js';
 import {
   EFFORTS,
@@ -55,6 +61,7 @@ import {
   selectWorkflow,
   workflowHistoryFromEvents,
   workflowListLines,
+  workflowRunActive,
 } from '../workflow/ux/workflowView.js';
 
 
@@ -663,6 +670,43 @@ export async function runProjectTask(message, context) {
   const { state, projectService, turnManager, fileStore, confirm } = context;
   if (!projectService || !turnManager) throw new Error('Project turns are not available');
   const threadId = await ensureProjectThread(projectService, turnManager, state);
+  const activeLegacy = context.workflowManager?.list?.().find((workflow) => (
+    workflowRunActive(workflow)
+    && (!state.projectRoot
+      || (workflow.projectRoot
+        && path.resolve(workflow.projectRoot) === path.resolve(state.projectRoot)))
+  )) || null;
+  let taskMessage = message;
+  let workflowMetadata = {};
+  if (context.zipflowWorkflowRuntime && !activeLegacy) {
+    const workflow = await context.zipflowWorkflowRuntime.openProject(state.projectRoot);
+    if (!state.projectId) {
+      const scan = await projectService.scan(state.projectRoot, {
+        skills: state.enabledSkills,
+      });
+      state.projectId = scan.project.id;
+    }
+    const workflowRequestId = `bridge-request-${randomUUID()}`;
+    const workflowId = workflow.workflowId;
+    workflowMetadata = { workflowId, workflowRequestId };
+    taskMessage = `${message}
+
+Return project changes as one complete ZIP archive. Include .zipflow/result.json:
+{
+  "version": 1,
+  "status": "changed | unchanged | completed",
+  "summary": "non-empty summary",
+  "commitMessage": "concise Git commit message",
+  "files": ["optional/safe/relative/path"],
+  "producer": {
+    "name": "chatgpt-bridge",
+    "workflowId": ${JSON.stringify(workflowId)},
+    "requestId": ${JSON.stringify(workflowRequestId)},
+    "projectId": ${JSON.stringify(state.projectId)}
+  }
+}
+You may put the commit message in .zipflow/commit-message.txt. It takes precedence over commitMessage. Do not include patch files.`;
+  }
   const spinner = context.createConsoleStream ? null : createSpinner('Running project task', process.stdout);
   const consoleStream = context.createConsoleStream ? context.createConsoleStream('Running project task') : createConsoleStream(spinner, process.stdout);
   spinner?.start();
@@ -670,7 +714,7 @@ export async function runProjectTask(message, context) {
   const { turn } = await turnManager.startTurn({
     threadId,
     cwd: state.projectRoot,
-    message,
+    message: taskMessage,
     model: state.model,
     effort: state.effort,
     sessionId: state.sessionId,
@@ -682,6 +726,7 @@ export async function runProjectTask(message, context) {
       snapshotPolicy: 'reuse-if-unchanged',
     },
     output: { expected: 'zip', required: true },
+    metadata: workflowMetadata,
   }, {
     confirmClientSelection: typeof confirm === 'function' ? ({ message: question }) => confirm(question) : null,
   });
@@ -713,11 +758,23 @@ export async function runProjectTask(message, context) {
       writeStatus(`[result] selected for /apply: turn ${selectedResult.turnId}${selectedResult.fileId ? ` · file ${selectedResult.fileId}` : ''}`);
       if (finalTurn.output.fileId) {
         if (fileStore && state.lastAppliedTurnId !== finalTurn.id) {
-          writeStatus('[task] planning apply decision for downloaded ZIP.');
-          try {
-            await runWithStreamedConsole(() => applyLastTurnResult(fileStore, state, { auto: true, confirm, projectService, turnManager }), context, consoleStream);
-          } catch (err) {
-            writeStatus(`[apply] automatic apply failed: ${err.message || String(err)}. Result remains selected for /apply.`);
+          if (context.autoHandoff === false) {
+            writeStatus('[task] ZIP retained for the active Bridge orchestration step.');
+          } else {
+            writeStatus('[task] handing the downloaded ZIP to the workflow service.');
+            try {
+              const applyResult = context.zipflowWorkflowRuntime && !activeLegacy
+                ? () => startServerArchiveWorkflow(context)
+                : () => applyLastTurnResult(fileStore, state, {
+                  auto: true,
+                  confirm,
+                  projectService,
+                  turnManager,
+                });
+              await runWithStreamedConsole(applyResult, context, consoleStream);
+            } catch (err) {
+              writeStatus(`[workflow] artifact handoff failed: ${err.message || String(err)}. Result remains selected for /apply.`);
+            }
           }
         } else {
           writeStatus('[result] use /apply --force to apply it without prompts, or /apply --interactive to select changes.');
@@ -743,6 +800,7 @@ export async function runProjectTask(message, context) {
     }
     throw new Error(finalTurn?.error?.message || `Turn ended with status: ${finalTurn?.status}`);
   }
+  return finalTurn;
 }
 
 export async function runDirectPrompt(message, context) {
@@ -892,103 +950,4 @@ export async function runResume(context) {
   if (Array.isArray(response.artifacts) && response.artifacts.length) state.lastArtifacts = response.artifacts;
   consoleStream.finish(answerText);
   return response;
-}
-
-export async function recoverLatestResponse(context, { force = false, apply = false, index = 1, list = false } = {}) {
-  const { bridge, turnManager, fileStore, state, projectService, confirm } = context;
-
-  if (list) {
-    console.log('[recover] requesting recent assistant responses from the active ChatGPT tab...');
-    const responses = await bridge.recoverResponses({ limit: 5, timeoutMs: 30_000 });
-    if (!responses.length) {
-      console.log('[recover] no visible assistant responses found');
-      return null;
-    }
-    console.log('[recover] recent assistant responses:');
-    for (const item of responses) {
-      const preview = truncate(item.answer || item.thinking || '(empty)', 160);
-      console.log(`  [${item.candidateIndex || '?'}] turn ${item.turnIndex ?? '?'} · ${item.answer.length} chars · ${item.artifacts.length} artifact(s) · ${preview}`);
-    }
-    console.log('Use /recover <n> or /recover <n> --apply to pick one.');
-    return responses;
-  }
-
-  const selectedIndex = Math.max(1, Number(index) || 1);
-  if (turnManager) {
-    console.log(`[recover] requesting assistant response #${selectedIndex} from the active ChatGPT tab...`);
-    const expectedOutput = state.projectRoot ? { expected: 'zip', required: true } : { expected: 'text', required: false };
-    const turn = await turnManager.recoverTurnFromLatestResponse(state.lastTurnId || '', {
-      force,
-      index: selectedIndex,
-      timeoutMs: 30_000,
-      allowAdoptedTurn: true,
-      threadId: state.projectThreadId || '',
-      cwd: state.projectRoot || '',
-      sessionId: state.sessionId || '',
-      expectedOutput,
-    });
-    state.lastTurnId = turn.id;
-    state.lastTurn = turn;
-    if (turn.threadId) state.projectThreadId = turn.threadId;
-    console.log(`[recover] recovered ${turn.id} from assistant response #${selectedIndex} · ${turn.status}`);
-    if (turn.output) {
-      console.log(`[recover] result: ${turn.output.type || 'unknown'} · ${turn.output.name || ''} · ${bytes(turn.output.size)}`);
-      if (turn.output.fileId) console.log(`[recover] file: ${turn.output.fileId}`);
-      if (turn.output.reconstructedFrom) console.log(`[recover] reconstructed from: ${turn.output.reconstructedFrom}`);
-      if (turn.output.type === 'zip' && turn.output.fileId) selectResultForApply(state, turn, { source: 'recover' });
-      else if (apply) clearSelectedResult(state, 'recover_without_zip');
-    }
-    const recoveredText = await answerTextFromTurnItems(turnManager, turn);
-    rememberResponse(state, {
-      id: turn.id,
-      turnId: turn.id,
-      source: 'recover',
-      title: `Recovered response ${turn.id}`,
-      text: recoveredText,
-      artifactCount: Array.isArray(turn.output?.artifacts) ? turn.output.artifacts.length : 0,
-      createdAt: turn.completedAt || turn.updatedAt || turn.createdAt,
-    });
-    if (apply && turn.output?.type === 'zip') {
-      console.log('[recover] applying recovered ZIP result...');
-      await applyLastTurnResult(fileStore, state, { force, confirm, projectService, turnManager });
-    } else if (apply) {
-      console.log('[recover] recovered response is not a ZIP result; nothing to apply');
-    }
-    return turn;
-  }
-
-  console.log(`[recover] requesting assistant response #${selectedIndex} from the active ChatGPT tab...`);
-  const response = await bridge.recoverLatestResponse({ index: selectedIndex, timeoutMs: 30_000 });
-  state.lastArtifacts = response.artifacts || [];
-  console.log(`[recover] assistant response #${selectedIndex} · ${response.answer.length} chars · ${state.lastArtifacts.length} artifact(s)`);
-  rememberResponse(state, {
-    id: `recovered-${selectedIndex}-${Date.now()}`,
-    source: 'recover',
-    title: `Recovered assistant response #${selectedIndex}`,
-    text: response.answer || response.response || '',
-    artifactCount: state.lastArtifacts.length,
-    createdAt: response.recoveredAt,
-  });
-  if (response.answer) console.log(response.answer.slice(0, 2000));
-  if (state.lastArtifacts.length) {
-    for (const [artifactIndex, artifact] of state.lastArtifacts.entries()) console.log(`  [${artifactIndex + 1}] ${artifact.name || artifact.id || 'artifact'} · ${artifact.id || ''}`);
-  }
-  return response;
-}
-
-export async function downloadLastTurnResult(fileStore, state, targetArg = '') {
-  const turn = state.lastTurn;
-  const fileId = turn?.output?.fileId;
-  if (!fileId) {
-    console.log('No downloadable ZIP result in the last turn.');
-    return;
-  }
-  const readable = await fileStore.getReadable(fileId);
-  if (!readable?.absolutePath) throw new Error(`Result file is not readable: ${fileId}`);
-  let target = targetArg ? path.resolve(targetArg) : path.join(config.dataDir, 'downloads', readable.name || `result-${turn.id}.zip`);
-  const stat = await fs.stat(target).catch(() => null);
-  if (stat?.isDirectory()) target = path.join(target, readable.name || `result-${turn.id}.zip`);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.copyFile(readable.absolutePath, target);
-  console.log(`[result] downloaded → ${target}`);
 }

@@ -7,6 +7,7 @@ import { extractZipFile } from '../src/zipUtils.js';
 import { writeZip } from '../src/zipWriter.js';
 import {
   LEGACY_BRIDGE_RESULT_MANIFEST,
+  validateServerWorkflowResultMetadata,
   validateWorkflowResultProtocol,
   ZIPFLOW_COMMIT_MESSAGE,
   ZIPFLOW_RESULT_MANIFEST,
@@ -107,6 +108,31 @@ test('Zipflow result metadata rejects producer correlation mismatches', async ()
     });
     assert.equal(result.ok, false);
     assert.ok(result.reasons.some((reason) => reason.includes('producer.requestId mismatch')));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('server handoff validates correlated metadata without inspecting project mutations', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'bridge-server-result-'));
+  try {
+    const zipPath = path.join(root, 'result.zip');
+    await writeZip(zipPath, [
+      { name: ZIPFLOW_RESULT_MANIFEST, data: JSON.stringify(manifest()) },
+      { name: 'src/index.js', data: 'export const server = true;\n' },
+    ]);
+    const accepted = await validateServerWorkflowResultMetadata({
+      zipPath,
+      producer: manifest().producer,
+    });
+    assert.equal(accepted.ok, true);
+
+    const rejected = await validateServerWorkflowResultMetadata({
+      zipPath,
+      producer: { ...manifest().producer, requestId: 'wrong-request' },
+    });
+    assert.equal(rejected.ok, false);
+    assert.ok(rejected.reasons.some((reason) => reason.includes('producer.requestId mismatch')));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

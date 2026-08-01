@@ -48,6 +48,11 @@ import {
   switchSessionScope,
 } from './state.js';
 import { INTERACTIVE_THEME_PROFILES, interactiveThemeProfile, isInteractiveThemeName } from './terlioThemes.js';
+import {
+  runServerWorkflowCommand,
+  startServerArchiveWorkflow,
+  migrateLegacyWorkflowCommand,
+} from './serverWorkflowCommands.js';
 
 function printHelp() {
   console.log('Commands:');
@@ -149,10 +154,26 @@ function workflowSessionOptions(tokens, state, workflow = {}) {
   return { sessionPolicy: 'pinned', sessionId: value };
 }
 
+function activeLegacyForProject(workflowManager, state) {
+  return workflowManager?.list?.().find((workflow) => (
+    workflowRunActive(workflow)
+    && (!state.projectRoot
+      || (workflow.projectRoot
+        && path.resolve(workflow.projectRoot) === path.resolve(state.projectRoot)))
+  )) || null;
+}
+
 export async function handleCommand(message, context) {
   const { bridge, fileStore, state, projectService, turnManager, workflowManager, confirm } = context;
   const [command, ...tokens] = shellSplit(message);
   const rest = message.slice(command.length).trim();
+  const serverCommand = (args) => runServerWorkflowCommand({
+    ...context,
+    requestProjectArtifact: (prompt) => runProjectTask(prompt, {
+      ...context,
+      autoHandoff: false,
+    }),
+  }, args);
 
   if (message === '/help') { printHelp(); return true; }
 
@@ -202,13 +223,52 @@ export async function handleCommand(message, context) {
 
   if (command === '/workflow') {
     if (!workflowManager) throw new Error('Workflow manager is not available');
-    if (!tokens.length && typeof context.openWorkflowWizard === 'function') {
+    const activeLegacy = activeLegacyForProject(workflowManager, state);
+    const migrationCandidate = workflowManager.list().find((workflow) => (
+      !workflowRunActive(workflow)
+      && (!state.projectRoot || path.resolve(workflow.projectRoot) === path.resolve(state.projectRoot))
+    )) || null;
+    if (!tokens.length && activeLegacy && typeof context.openWorkflowWizard === 'function') {
+      await context.openWorkflowWizard();
+      return true;
+    }
+    if (!tokens.length && migrationCandidate && context.zipflowMigrationRuntime) {
+      await migrateLegacyWorkflowCommand(context, migrationCandidate.id);
+      return true;
+    }
+    if (!tokens.length && context.zipflowWorkflowRuntime) {
+      await serverCommand([]);
+      return true;
+    }
+    if (String(tokens[0] || '').toLowerCase() === 'migrate') {
+      const workflowId = positionalTokens(tokens.slice(1))[0]
+        || migrationCandidate?.id;
+      if (!workflowId) throw new Error('Usage: /workflow migrate <legacy-workflow-id>');
+      await migrateLegacyWorkflowCommand(context, workflowId);
+      return true;
+    }
+    if (['server', 'service'].includes(String(tokens[0] || '').toLowerCase())
+      && typeof context.openWorkflowSurface === 'function') {
+      await serverCommand(tokens.slice(1));
+      return true;
+    }
+    if (String(tokens[0] || '').toLowerCase() === 'legacy'
+      && typeof context.openWorkflowWizard === 'function') {
       await context.openWorkflowWizard();
       return true;
     }
     const sub = String(tokens[0] || 'open').toLowerCase();
     const args = tokens.slice(1);
 
+    if (['history', 'plan', 'diff', 'report', 'checks', 'preset', 'fix', 'run'].includes(sub)
+      && context.zipflowWorkflowRuntime) {
+      await serverCommand(tokens);
+      return true;
+    }
+    if (['open', 'new'].includes(sub) && context.zipflowWorkflowRuntime) {
+      await serverCommand(['open']);
+      return true;
+    }
     if (['wizard', 'open', 'new', 'active', 'action', 'settings'].includes(sub) && typeof context.openWorkflowWizard === 'function') {
       const view = sub === 'open' || sub === 'wizard' ? '' : sub;
       await context.openWorkflowWizard({ view, pendingOnly: sub === 'action' });
@@ -392,7 +452,7 @@ export async function handleCommand(message, context) {
       }
       return true;
     }
-    console.log('Usage: /workflow [wizard|open|new|active|action|settings]');
+    console.log('Usage: /workflow [wizard|open|new|active|action|settings|service]');
     return true;
   }
 
@@ -678,6 +738,16 @@ export async function handleCommand(message, context) {
 
   if (command === '/apply') {
     const pathArg = tokens.find((token) => !token.startsWith('--')) || '';
+    const activeLegacy = activeLegacyForProject(workflowManager, state);
+    if (context.zipflowWorkflowRuntime && !activeLegacy) {
+      if (tokens.includes('--force')) {
+        throw Object.assign(new Error(
+          '`/apply --force` is unavailable for server-backed workflows; approve only actions advertised by Zipflow.',
+        ), { code: 'WORKFLOW_FORCE_UNSUPPORTED' });
+      }
+      await startServerArchiveWorkflow(context, { explicitPath: pathArg });
+      return true;
+    }
     if (pathArg) {
       await applyZipPathResult(pathArg, state, { force: tokens.includes('--force'), planOnly: tokens.includes('--plan'), interactive: tokens.includes('--interactive'), confirm, projectService });
     } else {

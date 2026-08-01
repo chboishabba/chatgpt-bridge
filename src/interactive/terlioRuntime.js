@@ -66,6 +66,7 @@ import { ApplyWorkflowLiveMonitor } from './applyWorkflowLiveMonitor.js';
 import { InteractiveIntelligenceSync } from './intelligenceSync.js';
 import { offerWorkflowContinuation, resolveInteractiveStartup } from './startupWorkflow.js';
 import { handleConfirmationKey, handleInteractiveInterrupt, handleRequestInterruptKey, handleWorkflowExitKey as handleExitWorkflowKey } from './interruptControl.js';
+import { InteractiveWorkflowSurfaceRuntime } from './workflowSurfaceRuntime.js';
 
 const MAX_ACTIVITY_LINES = 6;
 const MAX_EVENT_LINES = 10;
@@ -96,6 +97,9 @@ export class TerlioInteractiveRuntime {
     this.interruptPrompt = false;
     this.workflowExitPrompt = null;
     this.workflowWizard = new WorkflowWizardController(this);
+    this.workflowSurface = options.zipflowWorkflowRuntime
+      ? new InteractiveWorkflowSurfaceRuntime(this, options.zipflowWorkflowRuntime)
+      : null;
     this.applyWorkflowLiveMonitor = new ApplyWorkflowLiveMonitor(this);
     this.intelligenceSync = new InteractiveIntelligenceSync(this);
     this.confirmPrompt = '';
@@ -219,6 +223,7 @@ export class TerlioInteractiveRuntime {
     this.unsubscribeWorkflowEvents?.();
     this.unsubscribeWorkflowEvents = () => {};
     this.intelligenceSync.close();
+    this.workflowSurface?.closeRuntime();
     this.input.off('data', this.boundData);
     this.output.off?.('resize', this.boundResize);
     this.pointerActive = false;
@@ -284,6 +289,7 @@ export class TerlioInteractiveRuntime {
       interruptPrompt: this.interruptPrompt,
       workflowExitPrompt: this.workflowExitPrompt,
       workflowWizard: this.workflowWizard.model(),
+      workflowSurface: this.workflowSurface?.model() || null,
       confirmPrompt: this.confirmPrompt,
       detailsOpen: this.detailsOpen,
       transcriptScroll: this.transcriptScroll,
@@ -310,6 +316,9 @@ export class TerlioInteractiveRuntime {
       projectService: this.options.projectService,
       turnManager: this.options.turnManager,
       workflowManager: this.options.workflowManager,
+      zipflowWorkflowRuntime: this.options.zipflowWorkflowRuntime,
+      zipflowMigrationRuntime: this.options.zipflowMigrationRuntime,
+      workflowBackendRouter: this.options.workflowBackendRouter,
       createConsoleStream: (label = 'Working') => this.createConsoleStream(label),
       captureConsoleForStream: true,
       confirm: async (question) => new Promise((resolve) => {
@@ -318,6 +327,10 @@ export class TerlioInteractiveRuntime {
         this.invalidate();
       }),
       openWorkflowWizard: async (options = {}) => await this.workflowWizard.open(options),
+      openWorkflowSurface: async (options = {}) => {
+        if (!this.workflowSurface) throw new Error('Workflow service is not available');
+        return await this.workflowSurface.open(options);
+      },
     };
   }
 
@@ -484,6 +497,10 @@ export class TerlioInteractiveRuntime {
 
   handleWorkflowWizardKey(key) {
     return this.workflowWizard.handleKey(key);
+  }
+
+  handleWorkflowSurfaceKey(key) {
+    return this.workflowSurface.handleKey(key);
   }
 
   handleConfirmKey(key, text) { return handleConfirmationKey(this, key, text); }

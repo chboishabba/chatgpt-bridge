@@ -126,6 +126,51 @@ async function applyCommitMessageOverride(zipPath, manifest, zipOptions) {
   };
 }
 
+export async function validateServerWorkflowResultMetadata({
+  zipPath,
+  producer = {},
+  requireCommitMessage = false,
+  acceptLegacyManifest = false,
+  maxEntries = 20_000,
+  maxExtractedBytes = 512 * 1024 * 1024,
+} = {}) {
+  const workflow = {
+    id: String(producer.workflowId || ''),
+    projectId: String(producer.projectId || ''),
+    artifact: { maxEntries, maxExtractedBytes },
+    resultProtocol: {
+      required: true,
+      manifest: ZIPFLOW_RESULT_MANIFEST,
+      acceptLegacyManifest,
+      requireCommitMessage,
+      producer: {
+        name: String(producer.name || 'chatgpt-bridge'),
+        workflowId: String(producer.workflowId || ''),
+        requestId: String(producer.requestId || ''),
+        projectId: String(producer.projectId || ''),
+      },
+    },
+  };
+  const zipOptions = { maxEntries, maxUncompressedSize: maxExtractedBytes };
+  const found = await readResultManifest(zipPath, workflow.resultProtocol, zipOptions);
+  const override = await applyCommitMessageOverride(zipPath, found.manifest, zipOptions);
+  const reasons = [];
+  if (!override.manifest) reasons.push(`result archive is missing ${found.manifestPath}`);
+  else reasons.push(...validateManifestShape(override.manifest, workflow, {
+    requireProducer: found.manifestPath === ZIPFLOW_RESULT_MANIFEST,
+    producer,
+  }));
+  if (override.reason) reasons.push(override.reason);
+  return {
+    ok: reasons.length === 0,
+    manifestPath: found.manifestPath,
+    manifest: override.manifest,
+    legacyManifest: found.manifestPath === LEGACY_BRIDGE_RESULT_MANIFEST,
+    commitMessageSource: override.commitMessageSource,
+    reasons,
+  };
+}
+
 export async function validateWorkflowResultProtocol({
   workflow,
   zipPath,

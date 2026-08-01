@@ -40,6 +40,10 @@ test('artifact transfer uploads one verified descriptor and persists correlation
         order.push('run');
         assert.equal(projectId, 'project-1');
         assert.equal(body.blobId, `sha256:${file.sha256}`);
+        assert.deepEqual(body.correlation, {
+          producer: 'chatgpt-bridge',
+          requestId: 'request-1',
+        });
         assert.equal(options.idempotencyKey, 'run-key');
         return { runId: 'run-1', operationId: 'operation-1', status: 'running' };
       },
@@ -57,13 +61,18 @@ test('artifact transfer uploads one verified descriptor and persists correlation
     const result = await transfer.uploadAndStartArchiveRun({
       fileId: file.id,
       projectId: 'project-1',
-      correlation: { producer: 'chatgpt-bridge', requestId: 'request-1' },
+      correlation: {
+        producer: 'chatgpt-bridge',
+        requestId: 'request-1',
+        projectId: 'bridge-project-1',
+      },
       uploadIdempotencyKey: 'upload-key',
       runIdempotencyKey: 'run-key',
     });
 
     assert.deepEqual(order, ['upload', 'persist', 'run']);
     assert.equal(persisted.blobId, `sha256:${file.sha256}`);
+    assert.equal(persisted.correlation.projectId, 'bridge-project-1');
     assert.equal(result.run.runId, 'run-1');
     assert.equal(uploadRequest.idempotencyKey, 'upload-key');
     assert.equal(Object.hasOwn(uploadRequest, 'path'), false);

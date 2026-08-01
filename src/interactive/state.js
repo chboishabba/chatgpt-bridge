@@ -11,6 +11,7 @@ export function normalizeSelectedResult(value = null) {
   if (!value || typeof value !== 'object') return null;
   const result = {
     turnId: String(value.turnId || ''),
+    workflowId: String(value.workflowId || ''),
     projectId: String(value.projectId || ''),
     projectRoot: String(value.projectRoot || ''),
     sessionId: String(value.sessionId || ''),
@@ -42,12 +43,17 @@ export function selectedResultFromTurn(state = {}, turn = {}, { source = 'result
   const sourceClientId = String(output.sourceClientId || '');
   return normalizeSelectedResult({
     turnId: turn.id || '',
+    workflowId: turn.input?.metadata?.workflowId || '',
     projectId: state.projectId || turn.input?.project?.id || '',
     projectRoot: state.projectRoot || turn.input?.cwd || '',
     sessionId: state.sessionId || turn.input?.sessionId || '',
     sourceClientId,
     sourceTurnKey: output.sourceTurnKey || '',
-    sourceRequestId: output.sourceRequestId || output.requestId || turn.id || '',
+    sourceRequestId: turn.input?.metadata?.workflowRequestId
+      || output.sourceRequestId
+      || output.requestId
+      || turn.id
+      || '',
     artifactId: output.artifactId || '',
     fileId: output.fileId || '',
     downloadId: output.downloadId || '',

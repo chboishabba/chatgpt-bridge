@@ -2,7 +2,7 @@
 
 Local HTTP/OpenAI-compatible bridge for a logged-in ChatGPT browser tab.
 
-The browser runtime is the Chrome/Chromium extension. Its background service worker owns the authenticated localhost WebSocket, persisted per-tab lease/effect/download state, and the acknowledged critical outbox. Bridge 6.3.x requires Protocol 5 and extension 2.3.x.
+The browser runtime is the Chrome/Chromium extension. Its background service worker owns the authenticated localhost WebSocket, persisted per-tab lease/effect/download state, and the acknowledged critical outbox. Bridge 6.4.x requires Protocol 5 and extension 2.3.x.
 
 ```text
 Client / CLI → Express API → browser companion hub → extension background WebSocket → content script → ChatGPT Web UI
@@ -279,6 +279,16 @@ Workflows are started and controlled through one interactive entry point:
 ```
 
 The wizard offers exactly three goals: apply changes returned by ChatGPT, fix the project until selected checks pass, or work through a guided task. It detects the current project and likely check commands, configures the ChatGPT chat, and shows a final summary before starting. Existing interactive behavior remains unchanged until a workflow is explicitly started.
+
+Starting with Bridge 6.4, new workflows use the authenticated local Zipflow
+1.9 service. Bridge keeps the single integrated TUI and ChatGPT orchestration;
+the service exclusively owns archive inspection, project writes, checks, Git,
+deployment, history, and rollback. Active legacy v3 runs are allowed to settle
+and require an explicit reviewed migration before cutover. See
+[Local workflow service integration](docs/ZIPFLOW_SERVER.md).
+This server path is the normal Bridge workflow implementation, not an
+experimental mode, and it never falls back to legacy local mutations after a
+service failure.
 
 Choosing **Start a new chat** creates a separate Bridge-owned ChatGPT tab before any workflow prompt is sent. Bridge targets that exact tab and pins the workflow only after ChatGPT creates a concrete conversation URL. It does not reuse the selected control tab, does not treat the placeholder `new` as a conversation ID, and does not call session selection against that placeholder. Extension `2.3.11` also scopes each connection to the real Chrome tab ID, so tabs that inherited the same `sessionStorage` identity cannot replace one another in a reconnect loop.
 

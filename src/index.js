@@ -18,6 +18,9 @@ import { TurnManager } from './turnManager.js';
 import { CodexRpcServer, runCodexStdio } from './codexRpcServer.js';
 import { ProjectService } from './projectService.js';
 import { WorkflowManager } from './workflow/workflowManager.js';
+import { createZipflowBridgeRuntime } from './workflow/server/zipflowBridgeRuntime.js';
+import { ZipflowMigrationRuntime } from './workflow/migration/zipflowMigrationRuntime.js';
+import { WorkflowBackendRouter } from './workflow/workflowBackendRouter.js';
 import { normalizeExtensionReloadPolicy } from './extensionStartup.js';
 import { runInteractiveStartupExtensionUpdate } from './interactive/startupExtensionUpdate.js';
 import { shutdownBridgeResources } from './shutdown.js';
@@ -126,6 +129,10 @@ if (isDebugClient) {
   const eventBus = new EventBus({ limit: config.debugEventsLimit });
   const hub = new BrowserExtensionHub(eventBus);
   const fileStore = new FileStore();
+  const zipflowWorkflowRuntime = createZipflowBridgeRuntime({
+    dataDir: config.dataDir,
+    fileStore,
+  });
   const metadataStore = new MetadataStore();
   const bridge = new BrowserBridge(hub, fileStore, eventBus, { autoOpenTab, publicBaseUrl: config.publicBaseUrl });
   const projectService = new ProjectService({ fileStore, metadataStore, eventBus });
@@ -156,6 +163,16 @@ if (isDebugClient) {
       timer.unref?.();
       return { scheduled: true, mode: request.mode, delayMs: request.delayMs };
     },
+  });
+  const zipflowMigrationRuntime = new ZipflowMigrationRuntime({
+    runtime: zipflowWorkflowRuntime,
+    workflowManager,
+    dataDir: config.dataDir,
+  });
+  const workflowBackendRouter = new WorkflowBackendRouter({
+    legacyBackend: workflowManager,
+    serverBackend: zipflowWorkflowRuntime,
+    serverStore: zipflowWorkflowRuntime.store,
   });
   const codexRpcServer = new CodexRpcServer({ turnManager, bridge, fileStore, metadataStore, eventBus, projectService });
   const app = createApp(bridge, fileStore, eventBus, turnManager, projectService, workflowManager);
@@ -328,7 +345,17 @@ if (isDebugClient) {
     if (isInteractive) {
       try {
         const { runInteractive } = await import('./interactive.js');
-        const interactiveResult = await runInteractive({ bridge, fileStore, turnManager, projectService, workflowManager, projectPath });
+        const interactiveResult = await runInteractive({
+          bridge,
+          fileStore,
+          turnManager,
+          projectService,
+          workflowManager,
+          zipflowWorkflowRuntime,
+          zipflowMigrationRuntime,
+          workflowBackendRouter,
+          projectPath,
+        });
         await shutdown('interactive-exit', 0, { preserveActiveWork: Boolean(interactiveResult?.preserveActiveWork) });
       } catch (err) {
         logError('Interactive mode failed:', err);
@@ -347,6 +374,8 @@ if (isDebugClient) {
     const preserveActiveWork = Boolean(options.preserveActiveWork || options.preserveWorkflowRuns);
     await shutdownBridgeResources({
       workflowManager,
+      zipflowWorkflowRuntime,
+      zipflowMigrationRuntime,
       bridge,
       hub,
       codexRpcServer,

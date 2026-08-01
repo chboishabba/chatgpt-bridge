@@ -14,7 +14,14 @@ export const REQUIRED_ZIPFLOW_CAPABILITIES = Object.freeze([
 ]);
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 502, 503, 504]);
-const RETRYABLE_CODES = new Set(['INTERNAL_ERROR', 'OPERATION_BUSY']);
+const RETRYABLE_CODES = new Set([
+  'INTERNAL_ERROR',
+  'OPERATION_BUSY',
+  'CONNECTION_FAILED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EPIPE',
+]);
 const REDACTED_KEY = /token|authorization|cookie|secret|credential|password/i;
 
 async function defaultSdkLoader() {
@@ -282,6 +289,29 @@ export class ZipflowWorkflowClient {
     return await this.#invoke('putWorkflow', [projectId, draft, options], { mutation: true });
   }
 
+  async uploadBlob({
+    body,
+    size,
+    filename,
+    idempotencyKey,
+    signal = undefined,
+  } = {}) {
+    return await this.#invoke('uploadZip', [body, {
+      filename,
+      contentLength: size,
+      idempotencyKey,
+      signal,
+    }], { mutation: true });
+  }
+
+  async startArchiveRun(projectId, draft, options = {}) {
+    return await this.#invoke('startArchiveRun', [projectId, draft, options], { mutation: true });
+  }
+
+  async startCheckRun(projectId, draft = {}, options = {}) {
+    return await this.#invoke('startCheckRun', [projectId, draft, options], { mutation: true });
+  }
+
   async getRun(runId) {
     return await this.#invoke('getRun', [runId]);
   }
@@ -302,12 +332,24 @@ export class ZipflowWorkflowClient {
     return await this.#invoke('getDiff', [runId, query]);
   }
 
+  async getOutput(runId, query = {}) {
+    return await this.#invoke('getOutput', [runId, query]);
+  }
+
+  async getReport(runId, options = {}) {
+    return await this.#invoke('getReport', [runId, options]);
+  }
+
   async getHistory(projectId, query = {}) {
     return await this.#invoke('getHistory', [projectId, query]);
   }
 
   async performAction(runId, actionId, input = {}, options = {}) {
     return await this.#invoke('performAction', [runId, actionId, input, options], { mutation: true });
+  }
+
+  async cancelOperation(operationId, options = {}) {
+    return await this.#invoke('cancelOperation', [operationId, options], { mutation: true });
   }
 
   async subscribeEvents(options = {}) {

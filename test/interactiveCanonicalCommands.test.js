@@ -180,3 +180,18 @@ test('/model list and /effort list update observed values without overwriting pr
   assert.equal(state.model, 'Saved project model');
   assert.equal(state.effort, 'xhigh');
 });
+
+test('/apply --force is rejected before a server-backed workflow mutation', async () => {
+  const state = makeDefaultState();
+  state.projectRoot = '/project';
+  await assert.rejects(
+    handleCommand('/apply --force', {
+      bridge: {},
+      fileStore: {},
+      state,
+      workflowManager: { list: () => [] },
+      zipflowWorkflowRuntime: {},
+    }),
+    (error) => error?.code === 'WORKFLOW_FORCE_UNSUPPORTED',
+  );
+});
