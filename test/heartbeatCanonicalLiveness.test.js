@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import {
   GenerationState,
   RequestDeadlineKind,
+  RequestEventType,
+  RequestLifecycle,
   SourceConnection,
+  createRequestEvent,
 } from '../src/bridge/state/requestEvents.js';
-import { createInitialRequestState } from '../src/bridge/state/requestPolicy.js';
+import { reduceRequestState } from '../src/bridge/state/requestMachine.js';
 import { deadlineIntentsForRequest } from '../src/bridge/deadlines/requestDeadlinePolicy.js';
 
 const options = {
@@ -16,30 +19,65 @@ const options = {
   forcedSnapshotCooldownMs: 60_000,
 };
 
-test('healthy heartbeat keeps a 30-minute active generation alive independently of meaningful progress age', () => {
+function reduce(state, event) {
+  const result = reduceRequestState(state, event);
+  assert.equal(result.accepted, true, JSON.stringify(result.diagnostics || []));
+  return result.state;
+}
+
+test('healthy received heartbeat keeps a 30-minute active generation alive without laundering semantic progress', () => {
+  const requestId = 'req-long-thinking';
   const createdAt = 1_000;
-  const heartbeatAt = createdAt + 30 * 60_000;
-  const base = createInitialRequestState({ requestId: 'req-long-thinking', at: createdAt });
-  const state = {
-    ...base,
-    revision: 9,
-    generation: GenerationState.ACTIVE,
-    source: {
-      ...base.source,
+  const generationAt = createdAt + 5_000;
+  const heartbeatReceivedAt = createdAt + 30 * 60_000;
+
+  let state = reduce(null, createRequestEvent(
+    RequestEventType.CREATED,
+    requestId,
+    {},
+    { occurredAt: createdAt, receivedAt: createdAt },
+  ));
+
+  state = reduce(state, createRequestEvent(
+    RequestEventType.SOURCE_BOUND,
+    requestId,
+    { clientId: 'tab-client', connection: SourceConnection.CONNECTED },
+    { occurredAt: createdAt + 100, receivedAt: createdAt + 100 },
+  ));
+
+  state = reduce(state, createRequestEvent(
+    RequestEventType.OBSERVATION_UPDATED,
+    requestId,
+    {
       clientId: 'tab-client',
-      connection: SourceConnection.CONNECTED,
+      lifecycle: RequestLifecycle.GENERATING,
+      generation: GenerationState.ACTIVE,
+      meaningful: true,
     },
-    timestamps: {
-      ...base.timestamps,
-      meaningfulProgressAt: createdAt,
-      heartbeatAt,
-    },
-  };
+    { occurredAt: generationAt, receivedAt: generationAt },
+  ));
+
+  const semanticProgressAt = state.timestamps.meaningfulProgressAt;
+  assert.equal(semanticProgressAt, generationAt);
+
+  // Model a stale/untrusted source timestamp arriving through a healthy local
+  // transport much later. Canonical liveness must use bridge receipt time.
+  state = reduce(state, createRequestEvent(
+    RequestEventType.HEARTBEAT,
+    requestId,
+    { clientId: 'tab-client' },
+    { occurredAt: createdAt + 10_000, receivedAt: heartbeatReceivedAt },
+  ));
+
+  assert.equal(state.timestamps.heartbeatAt, heartbeatReceivedAt);
+  assert.equal(state.timestamps.meaningfulProgressAt, semanticProgressAt);
+  assert.equal(state.generation, GenerationState.ACTIVE);
+  assert.equal(state.source.connection, SourceConnection.CONNECTED);
 
   const intents = deadlineIntentsForRequest(state, options);
   const hard = intents.find((item) => item.kind === RequestDeadlineKind.HARD_LIVENESS);
 
   assert.equal(intents.some((item) => item.kind === RequestDeadlineKind.PROGRESS_LIVENESS), false);
   assert.ok(intents.some((item) => item.kind === RequestDeadlineKind.FORCED_SNAPSHOT));
-  assert.equal(hard?.dueAt, heartbeatAt + options.hardLivenessTimeoutMs);
+  assert.equal(hard?.dueAt, heartbeatReceivedAt + options.hardLivenessTimeoutMs);
 });
