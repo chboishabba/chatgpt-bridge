@@ -184,7 +184,7 @@ export const config = Object.freeze({
   projectMaxSingleFileBytes: intFromEnv('PROJECT_MAX_SINGLE_FILE_BYTES', 1024 * 1024),
   projectContextMaxSymbols: intFromEnv('PROJECT_CONTEXT_MAX_SYMBOLS', 2000),
   projectTreeLimit: intFromEnv('PROJECT_TREE_LIMIT', 500),
-  allowedOrigins: csvFromEnv('ALLOWED_ORIGINS', 'https://chatgpt.com,https://chat.openai.com,null'),
+  allowedOrigins: csvFromEnv('ALLOWED_ORIGINS', 'chrome-extension://dchijcgcljbehhihflegffnhkambmmjb'),
 });
 
 export const CONFIG_ENV_SCHEMA = Object.freeze(Object.fromEntries(configEnvSchema));
