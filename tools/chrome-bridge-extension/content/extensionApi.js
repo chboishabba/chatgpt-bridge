@@ -25,6 +25,15 @@
     } catch {}
   }
 
+  async function readPrivateBridgeToken() {
+    try {
+      const stored = await chrome.storage?.local?.get?.(BRIDGE_TOKEN_STORAGE_KEY);
+      return String(stored?.[BRIDGE_TOKEN_STORAGE_KEY] || '');
+    } catch {
+      return '';
+    }
+  }
+
   function configuredBridgeOrigin() {
     try {
       const raw = localStorage.getItem(pageStorageKey('bridge.serverUrl'));
@@ -48,6 +57,20 @@
     } catch {
       return false;
     }
+  }
+
+  async function resolvePrivilegedRequestUrl(value) {
+    const parsed = new URL(String(value || ''));
+    if (
+      parsed.origin === configuredBridgeOrigin()
+      && parsed.pathname === '/extension/auth/check'
+      && parsed.searchParams.get('token') === BRIDGE_TOKEN_MARKER
+    ) {
+      const secret = await readPrivateBridgeToken();
+      if (!secret) throw new Error('BRIDGE_TOKEN is not configured in extension-private storage');
+      parsed.searchParams.set('token', secret);
+    }
+    return parsed.toString();
   }
 
   function getValue(key, fallback) {
@@ -124,38 +147,41 @@
       }, Number(details.timeout) || 0);
     }
 
-    chrome.runtime.sendMessage({
-      type: 'bridge.http',
-      requestId,
-      request: {
-        method: details.method || 'GET',
-        url: details.url,
-        headers: details.headers || {},
-        data: details.data,
-        responseType: details.responseType || 'text',
-      },
-    }, (response) => {
+    void resolvePrivilegedRequestUrl(details.url).then((resolvedUrl) => {
       if (aborted) return;
-      if (chrome.runtime.lastError) {
-        finish(details.onerror, { error: chrome.runtime.lastError.message });
-        return;
-      }
-      if (!response || response.error) {
-        finish(details.onerror, { error: response?.error || 'Extension HTTP request failed' });
-        return;
-      }
+      chrome.runtime.sendMessage({
+        type: 'bridge.http',
+        requestId,
+        request: {
+          method: details.method || 'GET',
+          url: resolvedUrl,
+          headers: details.headers || {},
+          data: details.data,
+          responseType: details.responseType || 'text',
+        },
+      }, (response) => {
+        if (aborted) return;
+        if (chrome.runtime.lastError) {
+          finish(details.onerror, { error: chrome.runtime.lastError.message });
+          return;
+        }
+        if (!response || response.error) {
+          finish(details.onerror, { error: response?.error || 'Extension HTTP request failed' });
+          return;
+        }
 
-      const result = response.result || {};
-      let body = result.data;
-      if (result.responseType === 'arraybuffer' && Array.isArray(body)) body = new Uint8Array(body).buffer;
-      const responseText = typeof body === 'string' ? body : body == null ? '' : JSON.stringify(body);
-      finish(details.onload, {
-        status: result.status || 0,
-        response: body,
-        responseText,
-        responseHeaders: result.contentType ? `content-type: ${result.contentType}` : '',
+        const result = response.result || {};
+        let body = result.data;
+        if (result.responseType === 'arraybuffer' && Array.isArray(body)) body = new Uint8Array(body).buffer;
+        const responseText = typeof body === 'string' ? body : body == null ? '' : JSON.stringify(body);
+        finish(details.onload, {
+          status: result.status || 0,
+          response: body,
+          responseText,
+          responseHeaders: result.contentType ? `content-type: ${result.contentType}` : '',
+        });
       });
-    });
+    }).catch((error) => finish(details.onerror, { error: error?.message || String(error) }));
 
     return {
       abort() {
