@@ -94,7 +94,6 @@ test('terminal observation does not treat an empty placeholder as completion', a
   assert.equal(evidence.eligible, false);
 });
 
-
 test('terminal observation rejects partial output while the DOM streaming marker remains visible', async () => {
   const policy = await loadPolicy();
   const evidence = policy.terminalObservationEvidence({
@@ -118,4 +117,57 @@ test('terminal observation rejects partial output while the DOM streaming marker
   assert.equal(evidence.streamingVisible, true);
   assert.equal(evidence.candidateVisible, false);
   assert.equal(evidence.eligible, false);
+});
+
+test('terminal observation does not finalize during a transient stop-button disappearance', async () => {
+  const policy = await loadPolicy();
+  const evidence = policy.terminalObservationEvidence({
+    sawGenerating: true,
+    snapshot: { answer: 'partial but message-shaped output', artifacts: [], hasFinalMessage: true },
+    signals: {
+      actionBarVisible: false,
+      regenerateButtonVisible: false,
+      stopButtonVisible: false,
+      hasActiveTool: false,
+      continueButtonVisible: false,
+      needsConfirmation: false,
+      hasError: false,
+      conversationMatches: true,
+    },
+    generating: false,
+    generationIdleForMs: 1_000,
+    terminalSettleMs: 900,
+    networkDone: false,
+  });
+  assert.equal(evidence.candidateVisible, true);
+  assert.equal(evidence.quietAfterGeneration, false);
+  assert.equal(evidence.eligible, false);
+});
+
+test('terminal observation remains blocked while a tool or continuation is active', async () => {
+  const policy = await loadPolicy();
+  for (const signals of [
+    { hasActiveTool: true, continueButtonVisible: false },
+    { hasActiveTool: false, continueButtonVisible: true },
+  ]) {
+    const evidence = policy.terminalObservationEvidence({
+      sawGenerating: true,
+      snapshot: { answer: 'apparently complete output', artifacts: [], hasFinalMessage: true },
+      signals: {
+        actionBarVisible: true,
+        regenerateButtonVisible: false,
+        stopButtonVisible: false,
+        needsConfirmation: false,
+        hasError: false,
+        conversationMatches: true,
+        ...signals,
+      },
+      generating: false,
+      generationIdleForMs: 30_000,
+      terminalSettleMs: 900,
+      networkDone: false,
+    });
+    assert.equal(evidence.candidateVisible, false);
+    assert.equal(evidence.eligible, false);
+  }
 });
