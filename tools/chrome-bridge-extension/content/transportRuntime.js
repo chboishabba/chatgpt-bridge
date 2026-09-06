@@ -4,8 +4,6 @@
   function createTransportRuntime({
     CONFIG,
     EXTENSION_API,
-    PAGE_ARTIFACT_CONTENT_SOURCE = 'chatgpt-browser-bridge-artifact-content-v1',
-    PAGE_ARTIFACT_MAIN_SOURCE = 'chatgpt-browser-bridge-artifact-main-v1',
     RECONNECT_RUNTIME,
     RUNTIME_CONFIG,
     applyCompatibilityStatus,
@@ -29,8 +27,6 @@
     let browserLaunchServerUrl = '';
     let extensionRequestSeq = 0;
     const extensionRequests = new Map();
-    const pageArtifactCaptures = new Map();
-    let pageArtifactCaptureSeq = 0;
     let artifactActionQueue = Promise.resolve();
     let reconnectTimer = null;
     let bridgeConnected = false;
@@ -39,7 +35,6 @@
       const next = Boolean(value);
       if (bridgeConnected === next) return;
       bridgeConnected = next;
-      if (!next) cancelAllPageArtifactCaptures(reason || 'bridge_disconnected');
       try { onBridgeConnectionChange(next, reason); } catch (error) {
         recordLocalLog('runtime.connection_callback_failed', { message: error?.message || String(error), reason });
       }
@@ -155,7 +150,7 @@
         return;
       }
       if (message.type === 'extension.status') {
-        if (/disconnect|unreachable|connecting|checking|queue|reconnect|closed|offline|failed|error/i.test(String(message.status || ''))) {
+        if (/disconnect|unreachable|connecting|queue|reconnect|closed|offline|failed|error/i.test(String(message.status || ''))) {
           setBridgeConnected(false, String(message.status || 'extension_status'));
         }
         if (message.compatibility) applyCompatibilityStatus(message.compatibility, message.status || 'extension status');
@@ -198,93 +193,10 @@
       });
     }
 
-    function cancelAllPageArtifactCaptures(reason = 'bridge_disconnected') {
-      for (const [captureId, state] of pageArtifactCaptures.entries()) {
-        if (state.settled) continue;
-        state.settled = true;
-        clearTimeout(state.timer);
-        state.reject(new Error(`Page artifact capture ${reason}`));
-        postPageArtifactMessage('artifact.capture.cancel', { captureId });
-      }
-      pageArtifactCaptures.clear();
-    }
-
-    function nextPageArtifactCaptureId() {
-      pageArtifactCaptureSeq += 1;
-      return `page-artifact-${Date.now().toString(36)}-${pageArtifactCaptureSeq.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    }
-    function postPageArtifactMessage(type, payload = {}) {
-      window.postMessage({ source: PAGE_ARTIFACT_CONTENT_SOURCE, type, ...payload }, '*');
-    }
-    function settlePageArtifactCapture(captureId, method, value) {
-      const state = pageArtifactCaptures.get(captureId);
-      if (!state || state.settled) return;
-      state.settled = true;
-      clearTimeout(state.timer);
-      pageArtifactCaptures.delete(captureId);
-      state[method](value);
-    }
-    window.addEventListener('message', (event) => {
-      if (event.source !== window) return;
-      const message = event.data || {};
-      if (message.source !== PAGE_ARTIFACT_MAIN_SOURCE) return;
-      const captureId = String(message.captureId || '');
-      const state = pageArtifactCaptures.get(captureId);
-      if (!state) return;
-      if (message.type === 'artifact.capture.armed') {
-        state.armed = true;
-        state.armedResolve?.(true);
-      } else if (message.type === 'artifact.capture.candidate') {
-        settlePageArtifactCapture(captureId, 'resolve', {
-          kind: String(message.kind || 'url'), url: String(message.url || ''), downloadName: String(message.downloadName || ''),
-          mime: String(message.mime || ''), size: Number(message.size || 0), blob: message.blob instanceof Blob ? message.blob : null,
-          observedAt: Number(message.observedAt || Date.now()),
-        });
-      }
-    });
-
-    async function armPageArtifactCapture(artifact = {}, timeoutMs = 45_000) {
-      const captureId = nextPageArtifactCaptureId();
-      let armedResolve;
-      let armedReject;
-      const armedPromise = new Promise((resolve, reject) => { armedResolve = resolve; armedReject = reject; });
-      const candidatePromise = new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pageArtifactCaptures.delete(captureId);
-          postPageArtifactMessage('artifact.capture.cancel', { captureId });
-          reject(new Error(`Timed out waiting for page-generated artifact: ${artifact.name || artifact.id || captureId}`));
-        }, Math.max(1_000, Number(timeoutMs) || 45_000));
-        pageArtifactCaptures.set(captureId, { resolve, reject, timer, armedResolve, armedReject, armed: false, settled: false });
-      });
-      postPageArtifactMessage('artifact.capture.arm', { captureId, expectedName: artifact.name || '', expectedNames: [artifact.name || artifact.fileName || ''].filter(Boolean), timeoutMs });
-      const ackTimer = setTimeout(() => armedReject(new Error('Page artifact capture bridge did not acknowledge arm request')), 1_500);
-      try { await armedPromise; }
-      catch (err) {
-        const state = pageArtifactCaptures.get(captureId);
-        if (state && !state.settled) {
-          state.settled = true;
-          clearTimeout(state.timer);
-          pageArtifactCaptures.delete(captureId);
-          state.reject(err);
-          candidatePromise.catch(() => {});
-        }
-        throw err;
-      } finally { clearTimeout(ackTimer); }
-      return {
-        captureId,
-        wait: candidatePromise,
-        addExpectedNames(expectedNames = []) { postPageArtifactMessage('artifact.capture.expect', { captureId, expectedNames: Array.from(expectedNames || []).filter(Boolean) }); },
-        cancel(reason = 'cancelled') {
-          const state = pageArtifactCaptures.get(captureId);
-          if (state && !state.settled) {
-            state.settled = true;
-            clearTimeout(state.timer);
-            pageArtifactCaptures.delete(captureId);
-            state.reject(new Error(`Page artifact capture ${reason}`));
-          }
-          postPageArtifactMessage('artifact.capture.cancel', { captureId });
-        },
-      };
+    async function armPageArtifactCapture() {
+      const error = new Error('Page-world artifact capture is disabled; use extension download, preview, or DOM URL capture');
+      error.code = 'PAGE_ARTIFACT_CAPTURE_DISABLED';
+      throw error;
     }
 
     function enqueueArtifactAction(task) {
