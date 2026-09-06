@@ -119,11 +119,17 @@ test('terminal observation rejects partial output while the DOM streaming marker
   assert.equal(evidence.eligible, false);
 });
 
-test('terminal observation does not finalize during a transient stop-button disappearance', async () => {
+test('transient stop-button disappearance is not enough to finalize before the quiescence window', async () => {
   const policy = await loadPolicy();
   const evidence = policy.terminalObservationEvidence({
     sawGenerating: true,
-    snapshot: { answer: 'partial but message-shaped output', artifacts: [], hasFinalMessage: true },
+    snapshot: {
+      phase: 'ASSISTANT_FINAL',
+      answer: 'partial but message-shaped output',
+      artifacts: [],
+      hasFinalMessage: true,
+      streamingVisible: false,
+    },
     signals: {
       actionBarVisible: false,
       regenerateButtonVisible: false,
@@ -136,38 +142,41 @@ test('terminal observation does not finalize during a transient stop-button disa
     },
     generating: false,
     generationIdleForMs: 1_000,
-    terminalSettleMs: 900,
+    terminalSettleMs: 1_500,
     networkDone: false,
   });
   assert.equal(evidence.candidateVisible, true);
   assert.equal(evidence.quietAfterGeneration, false);
   assert.equal(evidence.eligible, false);
+  assert.equal(evidence.confidence, 'low');
 });
 
-test('terminal observation remains blocked while a tool or continuation is active', async () => {
+test('visible stop button blocks terminal evidence even when other completion signals look strong', async () => {
   const policy = await loadPolicy();
-  for (const signals of [
-    { hasActiveTool: true, continueButtonVisible: false },
-    { hasActiveTool: false, continueButtonVisible: true },
-  ]) {
-    const evidence = policy.terminalObservationEvidence({
-      sawGenerating: true,
-      snapshot: { answer: 'apparently complete output', artifacts: [], hasFinalMessage: true },
-      signals: {
-        actionBarVisible: true,
-        regenerateButtonVisible: false,
-        stopButtonVisible: false,
-        needsConfirmation: false,
-        hasError: false,
-        conversationMatches: true,
-        ...signals,
-      },
-      generating: false,
-      generationIdleForMs: 30_000,
-      terminalSettleMs: 900,
-      networkDone: false,
-    });
-    assert.equal(evidence.candidateVisible, false);
-    assert.equal(evidence.eligible, false);
-  }
+  const evidence = policy.terminalObservationEvidence({
+    sawGenerating: true,
+    snapshot: {
+      answer: 'looks complete',
+      artifacts: [],
+      hasFinalMessage: true,
+      streamingVisible: false,
+    },
+    signals: {
+      actionBarVisible: true,
+      regenerateButtonVisible: true,
+      stopButtonVisible: true,
+      hasActiveTool: false,
+      continueButtonVisible: false,
+      needsConfirmation: false,
+      hasError: false,
+      conversationMatches: true,
+    },
+    generating: true,
+    generationIdleForMs: 10_000,
+    terminalSettleMs: 1_500,
+    networkDone: true,
+  });
+  assert.equal(evidence.strongUiEvidence, true);
+  assert.equal(evidence.candidateVisible, false);
+  assert.equal(evidence.eligible, false);
 });
