@@ -26,18 +26,6 @@
         "https://chat.openai.com/*"
       ],
       "js": [
-        "artifactCaptureMain.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": false,
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
-      ],
-      "js": [
         "shared/buildIdentity.js",
         "content/extensionApi.js",
         "content/runtimeConfig.js",
