@@ -10,6 +10,7 @@ import {
 } from '../src/bridge/state/requestEvents.js';
 import { reduceRequestState } from '../src/bridge/state/requestMachine.js';
 import { deadlineIntentsForRequest } from '../src/bridge/deadlines/requestDeadlinePolicy.js';
+import { hubActivityToCanonicalEvent } from '../src/bridge/adapters/hubObservationAdapter.js';
 
 const options = {
   meaningfulProgressTimeoutMs: 120_000,
@@ -25,11 +26,12 @@ function reduce(state, event) {
   return result.state;
 }
 
-test('healthy received heartbeat keeps a 30-minute active generation alive without laundering semantic progress', () => {
+test('hub activity keeps a 30-minute active generation alive without laundering semantic progress', () => {
   const requestId = 'req-long-thinking';
+  const clientId = 'tab-client';
   const createdAt = 1_000;
   const generationAt = createdAt + 5_000;
-  const heartbeatReceivedAt = createdAt + 30 * 60_000;
+  const heartbeatAt = createdAt + 30 * 60_000;
 
   let state = reduce(null, createRequestEvent(
     RequestEventType.CREATED,
@@ -41,7 +43,7 @@ test('healthy received heartbeat keeps a 30-minute active generation alive witho
   state = reduce(state, createRequestEvent(
     RequestEventType.SOURCE_BOUND,
     requestId,
-    { clientId: 'tab-client', connection: SourceConnection.CONNECTED },
+    { clientId, connection: SourceConnection.CONNECTED },
     { occurredAt: createdAt + 100, receivedAt: createdAt + 100 },
   ));
 
@@ -49,7 +51,7 @@ test('healthy received heartbeat keeps a 30-minute active generation alive witho
     RequestEventType.OBSERVATION_UPDATED,
     requestId,
     {
-      clientId: 'tab-client',
+      clientId,
       lifecycle: RequestLifecycle.GENERATING,
       generation: GenerationState.ACTIVE,
       meaningful: true,
@@ -60,16 +62,29 @@ test('healthy received heartbeat keeps a 30-minute active generation alive witho
   const semanticProgressAt = state.timestamps.meaningfulProgressAt;
   assert.equal(semanticProgressAt, generationAt);
 
-  // Model a stale/untrusted source timestamp arriving through a healthy local
-  // transport much later. Canonical liveness must use bridge receipt time.
-  state = reduce(state, createRequestEvent(
-    RequestEventType.HEARTBEAT,
+  const heartbeat = hubActivityToCanonicalEvent(
     requestId,
-    { clientId: 'tab-client' },
-    { occurredAt: createdAt + 10_000, receivedAt: heartbeatReceivedAt },
-  ));
+    clientId,
+    {
+      activeRequest: { requestId },
+      tabObservation: {
+        url: 'https://chatgpt.com/c/example',
+        conversationId: 'example',
+        generation: { state: 'active' },
+      },
+    },
+    {},
+    heartbeatAt,
+  );
 
-  assert.equal(state.timestamps.heartbeatAt, heartbeatReceivedAt);
+  assert.equal(heartbeat?.type, RequestEventType.HEARTBEAT);
+  assert.equal(heartbeat?.receivedAt, heartbeatAt);
+  assert.equal(heartbeat?.occurredAt, heartbeatAt);
+  assert.equal(heartbeat?.data.generating, true);
+
+  state = reduce(state, heartbeat);
+
+  assert.equal(state.timestamps.heartbeatAt, heartbeatAt);
   assert.equal(state.timestamps.meaningfulProgressAt, semanticProgressAt);
   assert.equal(state.generation, GenerationState.ACTIVE);
   assert.equal(state.source.connection, SourceConnection.CONNECTED);
@@ -79,5 +94,16 @@ test('healthy received heartbeat keeps a 30-minute active generation alive witho
 
   assert.equal(intents.some((item) => item.kind === RequestDeadlineKind.PROGRESS_LIVENESS), false);
   assert.ok(intents.some((item) => item.kind === RequestDeadlineKind.FORCED_SNAPSHOT));
-  assert.equal(hard?.dueAt, heartbeatReceivedAt + options.hardLivenessTimeoutMs);
+  assert.equal(hard?.dueAt, heartbeatAt + options.hardLivenessTimeoutMs);
+});
+
+test('hub activity refuses to heartbeat a different active request', () => {
+  const event = hubActivityToCanonicalEvent(
+    'req-a',
+    'tab-client',
+    { activeRequest: { requestId: 'req-b' } },
+    {},
+    1234,
+  );
+  assert.equal(event, null);
 });
