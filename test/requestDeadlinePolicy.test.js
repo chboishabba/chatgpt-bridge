@@ -44,6 +44,28 @@ test('active generation has snapshots and hard liveness but no progress cancella
   assert.equal(intents.some((item) => item.kind === RequestDeadlineKind.HARD_LIVENESS), true);
 });
 
+test('long active generation remains governed by heartbeat liveness rather than elapsed thinking time', () => {
+  const thirtyMinutes = 30 * 60 * 1_000;
+  const intents = deadlineIntentsForRequest(state({
+    generation: GenerationState.ACTIVE,
+    timestamps: {
+      createdAt: 100,
+      meaningfulProgressAt: 200,
+      heartbeatAt: thirtyMinutes + 250,
+    },
+  }), {
+    meaningfulProgressTimeoutMs: 120_000,
+    postGenerationTimeoutMs: 60_000,
+    hardLivenessTimeoutMs: 60_000,
+    forcedSnapshotAfterMs: 90_000,
+    forcedSnapshotCooldownMs: 60_000,
+  });
+  const byKind = Object.fromEntries(intents.map((item) => [item.kind, item]));
+  assert.equal(byKind[RequestDeadlineKind.PROGRESS_LIVENESS], undefined);
+  assert.equal(byKind[RequestDeadlineKind.HARD_LIVENESS].dueAt, thirtyMinutes + 60_250);
+  assert.ok(byKind[RequestDeadlineKind.FORCED_SNAPSHOT]);
+});
+
 test('artifact settling uses probe and settle deadlines instead of the request watchdog', () => {
   const base = state();
   const intents = deadlineIntentsForRequest({

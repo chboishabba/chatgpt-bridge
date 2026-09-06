@@ -94,7 +94,6 @@ test('terminal observation does not treat an empty placeholder as completion', a
   assert.equal(evidence.eligible, false);
 });
 
-
 test('terminal observation rejects partial output while the DOM streaming marker remains visible', async () => {
   const policy = await loadPolicy();
   const evidence = policy.terminalObservationEvidence({
@@ -116,6 +115,68 @@ test('terminal observation rejects partial output while the DOM streaming marker
     terminalSettleMs: 1_500,
   });
   assert.equal(evidence.streamingVisible, true);
+  assert.equal(evidence.candidateVisible, false);
+  assert.equal(evidence.eligible, false);
+});
+
+test('transient stop-button disappearance is not enough to finalize before the quiescence window', async () => {
+  const policy = await loadPolicy();
+  const evidence = policy.terminalObservationEvidence({
+    sawGenerating: true,
+    snapshot: {
+      phase: 'ASSISTANT_FINAL',
+      answer: 'partial but message-shaped output',
+      artifacts: [],
+      hasFinalMessage: true,
+      streamingVisible: false,
+    },
+    signals: {
+      actionBarVisible: false,
+      regenerateButtonVisible: false,
+      stopButtonVisible: false,
+      hasActiveTool: false,
+      continueButtonVisible: false,
+      needsConfirmation: false,
+      hasError: false,
+      conversationMatches: true,
+    },
+    generating: false,
+    generationIdleForMs: 1_000,
+    terminalSettleMs: 1_500,
+    networkDone: false,
+  });
+  assert.equal(evidence.candidateVisible, true);
+  assert.equal(evidence.quietAfterGeneration, false);
+  assert.equal(evidence.eligible, false);
+  assert.equal(evidence.confidence, 'low');
+});
+
+test('visible stop button blocks terminal evidence even when other completion signals look strong', async () => {
+  const policy = await loadPolicy();
+  const evidence = policy.terminalObservationEvidence({
+    sawGenerating: true,
+    snapshot: {
+      answer: 'looks complete',
+      artifacts: [],
+      hasFinalMessage: true,
+      streamingVisible: false,
+    },
+    signals: {
+      actionBarVisible: true,
+      regenerateButtonVisible: true,
+      stopButtonVisible: true,
+      hasActiveTool: false,
+      continueButtonVisible: false,
+      needsConfirmation: false,
+      hasError: false,
+      conversationMatches: true,
+    },
+    generating: true,
+    generationIdleForMs: 10_000,
+    terminalSettleMs: 1_500,
+    networkDone: true,
+  });
+  assert.equal(evidence.strongUiEvidence, true);
   assert.equal(evidence.candidateVisible, false);
   assert.equal(evidence.eligible, false);
 });
