@@ -39,6 +39,7 @@ async function loadExtensionApi(initial = {}) {
       storage: {
         local: {
           async set(values) { for (const [key, value] of Object.entries(values || {})) privateStorage.set(key, value); },
+          async get(key) { return { [key]: privateStorage.get(key) }; },
           async remove(key) { privateStorage.delete(key); },
         },
       },
@@ -108,6 +109,29 @@ test('privileged HTTP permits the configured loopback bridge origin', async () =
 
   assert.equal(runtimeMessages.length, 1);
   assert.equal(runtimeMessages[0].request.url, 'http://127.0.0.1:18181/files/signed-test');
+});
+
+test('privileged auth check substitutes the private token without exposing it in page storage', async () => {
+  const { api, pageStorage, runtimeMessages } = await loadExtensionApi({
+    pageStorage: {
+      'chatgptBridge:bridge.serverUrl': JSON.stringify('http://127.0.0.1:8080'),
+      'chatgptBridge:bridge.token': JSON.stringify(TOKEN_MARKER),
+    },
+    privateStorage: { [TOKEN_STORAGE_KEY]: 'private-bridge-token' },
+  });
+
+  await new Promise((resolve, reject) => {
+    api.httpRequest({
+      url: `http://127.0.0.1:8080/extension/auth/check?token=${encodeURIComponent(TOKEN_MARKER)}&runtime=extension`,
+      onload: resolve,
+      onerror: reject,
+    });
+  });
+
+  assert.equal(runtimeMessages.length, 1);
+  const sent = new URL(runtimeMessages[0].request.url);
+  assert.equal(sent.searchParams.get('token'), 'private-bridge-token');
+  assert.equal(pageStorage.value('chatgptBridge:bridge.token'), JSON.stringify(TOKEN_MARKER));
 });
 
 test('extension origin policy is pinned to the manifest-derived extension id', () => {
