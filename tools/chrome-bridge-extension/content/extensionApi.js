@@ -2,13 +2,16 @@
   'use strict';
 
   const STORAGE_PREFIX = 'chatgptBridge:';
-  // BRIDGE_TOKEN must not be persisted in chatgpt.com localStorage.  Keep only
+  // BRIDGE_TOKEN must not be persisted in chatgpt.com localStorage. Keep only
   // an opaque marker in page storage so the synchronous content-runtime config
   // can tell that a token has been configured; the secret itself lives in the
   // extension's chrome.storage.local namespace.
   const BRIDGE_TOKEN_KEY = 'bridge.token';
   const BRIDGE_TOKEN_MARKER = '__chatgpt_bridge_secret_in_extension_storage_v1__';
   const BRIDGE_TOKEN_STORAGE_KEY = 'chatgptBridge:secret:bridge.token';
+  const DEFAULT_BRIDGE_ORIGIN = 'http://127.0.0.1:8080';
+  const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
+  const CHATGPT_ORIGINS = new Set(['https://chatgpt.com', 'https://chat.openai.com']);
 
   function pageStorageKey(key) {
     return STORAGE_PREFIX + key;
@@ -22,6 +25,31 @@
     } catch {}
   }
 
+  function configuredBridgeOrigin() {
+    try {
+      const raw = localStorage.getItem(pageStorageKey('bridge.serverUrl'));
+      const saved = raw == null ? DEFAULT_BRIDGE_ORIGIN : JSON.parse(raw);
+      const parsed = new URL(String(saved || DEFAULT_BRIDGE_ORIGIN));
+      if (parsed.protocol !== 'http:' || !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase()) || parsed.username || parsed.password) {
+        return DEFAULT_BRIDGE_ORIGIN;
+      }
+      return parsed.origin;
+    } catch {
+      return DEFAULT_BRIDGE_ORIGIN;
+    }
+  }
+
+  function isAllowedPrivilegedRequestUrl(value) {
+    try {
+      const parsed = new URL(String(value || ''));
+      if (CHATGPT_ORIGINS.has(parsed.origin)) return true;
+      if (parsed.protocol !== 'http:' || !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) return false;
+      return parsed.origin === configuredBridgeOrigin();
+    } catch {
+      return false;
+    }
+  }
+
   function getValue(key, fallback) {
     try {
       const raw = localStorage.getItem(pageStorageKey(key));
@@ -30,9 +58,9 @@
 
       if (value === BRIDGE_TOKEN_MARKER) return BRIDGE_TOKEN_MARKER;
 
-      // One-time migration from pre-hardening versions.  Return the legacy
-      // value for this in-memory session so the current connection can succeed,
-      // but immediately remove the plaintext from the ChatGPT origin.
+      // One-time migration from pre-hardening versions. Return the legacy value
+      // for this in-memory session so the current connection can succeed, but
+      // immediately remove the plaintext from the ChatGPT origin.
       const legacySecret = typeof value === 'string' ? value : '';
       if (legacySecret) {
         persistBridgeToken(legacySecret);
@@ -78,6 +106,16 @@
         console.error('[chatgpt-bridge-extension] HTTP callback failed', err);
       }
     };
+
+    if (!isAllowedPrivilegedRequestUrl(details.url)) {
+      queueMicrotask(() => finish(details.onerror, { error: 'Extension refused privileged request outside configured bridge/ChatGPT origins' }));
+      return {
+        abort() {
+          aborted = true;
+          try { details.onabort?.(); } catch {}
+        },
+      };
+    }
 
     if (details.timeout) {
       timer = setTimeout(() => {
